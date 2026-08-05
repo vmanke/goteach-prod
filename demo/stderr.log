@@ -1,0 +1,8 @@
+goteach: 10 Züge, Brett 19×19, Komi 7.5, Regeln "chinese"
+╔══════════════════════════════════════════════════════════╗
+║  MOCK-MODUS: SYNTHETISCHE WERTE — KEINE ECHTE ANALYSE.   ║
+║  Nur für Pipeline-Demo/Tests. Für Teaching KataGo nutzen.║
+╚══════════════════════════════════════════════════════════╝
+teaching: analysiere 11 Stellungen (Visits=200) ...
+teaching: Zug 10/10 fertig
+goteach: JSON-Report → demo/report.json
