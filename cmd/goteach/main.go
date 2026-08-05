@@ -47,7 +47,8 @@ func run() error {
 			"Mock-Analyzer statt KataGo (SYNTHETISCHE Werte, nur Demo/Tests)")
 		jsonOut  = flag.String("json", "", "Reports zusätzlich als JSON schreiben")
 		useLLM   = flag.Bool("llm", false, "LLM-Feinschliff (ANTHROPIC_API_KEY aus .env)")
-		llmModel = flag.String("llm-model", "claude-sonnet-4-6", "Modell für -llm")
+		llmModel = flag.String("llm-model", "claude-fable-5",
+			"Modell für -llm (gültige IDs siehe README)")
 	)
 
 	flag.Parse()

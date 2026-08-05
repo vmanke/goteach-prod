@@ -76,7 +76,7 @@ Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zug
 Zusammenfassung
 ---------------
 Schwarz: ausgezeichnet ×5 | Ø Punktverlust -9.82
-Weiß: ausgezeichnet ×5 | Ø Punktverlust -10.26
+Weiß:    ausgezeichnet ×5 | Ø Punktverlust -10.26
 ```
 
 ## LLM-Feinschliff (optional)
@@ -85,6 +85,24 @@ Weiß: ausgezeichnet ×5 | Ø Punktverlust -10.26
 echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env   # NIE committen (.gitignore!)
 ./goteach -sgf partie.sgf ... -llm
 ```
+
+Standardmodell ist **`claude-fable-5`**, überschreibbar per `-llm-model`.
+Gültige aktuelle Modell-IDs (Messages API): `claude-fable-5`,
+`claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-sonnet-4-6`,
+`claude-haiku-4-5`.
+
+Hinweise zu `claude-fable-5`:
+
+* Preis $10 Input / $50 Output pro Million Token — bei langen Partien
+  `-from/-to` nutzen oder ein günstigeres Modell wählen.
+* Erfordert 30-Tage-Datenaufbewahrung beim API-Konto; Organisationen mit
+  Zero Data Retention erhalten pauschal HTTP 400 — dann z. B.
+  `-llm-model claude-opus-5` verwenden.
+* Sicherheits-Klassifizierer können einzelne Anfragen ablehnen
+  (`stop_reason: refusal`); goteach aktiviert dafür den serverseitigen
+  Fallback (`fallbacks: "default"`), sodass ein Ersatzmodell antwortet.
+  Schlägt der Feinschliff dennoch fehl, bleibt der verifizierte Basistext
+  erhalten.
 
 Designprinzip aus dem Architekturbericht: Das LLM rechnet nicht. Es erhält
 ausschließlich die bereits verifizierten Zahlen/Züge als JSON und darf nur

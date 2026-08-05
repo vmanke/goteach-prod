@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -17,8 +18,23 @@ import (
 // Der API-Key kommt aus der Umgebung (.env: ANTHROPIC_API_KEY); er wird nie
 // geloggt oder persistiert. Kostenhinweis: pro Zug ein API-Call — bei langen
 // Partien entsprechend budgetieren oder -llm nur für ausgewählte Züge nutzen.
+//
+// Bewusst Raw-HTTP statt offiziellem SDK: das Projekt bleibt dependency-frei.
+// Modellhinweise (Stand claude-fable-5 als Default):
+//   - Thinking ist auf Fable 5 immer aktiv und zählt gegen max_tokens;
+//     deshalb großzügiges max_tokens. Kein "thinking"-Feld senden — jede
+//     explizite Konfiguration außer adaptive wird mit 400 abgelehnt.
+//   - Sicherheits-Klassifizierer können Anfragen ablehnen (HTTP 200 mit
+//     stop_reason "refusal"); dafür wird der serverseitige Fallback
+//     (fallbacks: "default", Beta-Header) aktiviert, der die Anfrage von
+//     einem Ersatzmodell beantworten lässt.
 func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error) {
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
+
+	// Server-Fallback nur auf Modellen anfordern, die ihn unterstützen.
+	useFallback := strings.HasPrefix(model, "claude-fable-5") ||
+		strings.HasPrefix(model, "claude-mythos-5") ||
+		strings.HasPrefix(model, "claude-opus-5")
 
 	const system = "Sie sind ein erfahrener Go-Lehrer (Baduk/Weiqi). " +
 		"Formulieren Sie die gegebene, faktisch verifizierte Zuganalyse als " +
@@ -36,8 +52,9 @@ func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error
 		}
 
 		body := map[string]any{
-			"model":      model,
-			"max_tokens": 400,
+			"model": model,
+			// Thinking zählt auf Fable 5 mit gegen max_tokens.
+			"max_tokens": 2048,
 			"system":     system,
 			"messages": []map[string]any{
 				{
@@ -45,6 +62,10 @@ func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error
 					"content": "Verifizierte Fakten (JSON):\n" + string(facts),
 				},
 			},
+		}
+
+		if useFallback {
+			body["fallbacks"] = "default"
 		}
 
 		buf, err := json.Marshal(body)
@@ -64,6 +85,10 @@ func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error
 		req.Header.Set("x-api-key", apiKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
 
+		if useFallback {
+			req.Header.Set("anthropic-beta", "server-side-fallback-2026-07-01")
+		}
+
 		resp, err := client.Do(req)
 
 		if err != nil {
@@ -77,7 +102,8 @@ func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error
 		}
 
 		var out struct {
-			Content []struct {
+			StopReason string `json:"stop_reason"`
+			Content    []struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"content"`
@@ -85,6 +111,11 @@ func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error
 
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return "", err
+		}
+
+		// Klassifizierer-Ablehnung: kein Feinschliff, Basistext bleibt.
+		if out.StopReason == "refusal" {
+			return "", fmt.Errorf("llm: Anfrage abgelehnt (stop_reason=refusal)")
 		}
 
 		for _, c := range out.Content {
