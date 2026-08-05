@@ -3,7 +3,7 @@ package groups
 import (
 	"testing"
 
-	"github.com/vmanke/goteach/board"
+	"github.com/vmanke/goteach-prod/board"
 )
 
 func put(t *testing.T, b *board.Board, c board.Color, pts ...[2]int) {

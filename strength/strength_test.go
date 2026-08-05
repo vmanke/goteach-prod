@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/vmanke/goteach/board"
+	"github.com/vmanke/goteach-prod/board"
 )
 
 func TestGroupExtremes(t *testing.T) {

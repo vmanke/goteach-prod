@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vmanke/goteach/board"
+	"github.com/vmanke/goteach-prod/board"
 )
 
 // Position ist das Austauschformat des Erkenners: rows[0] ist die oberste

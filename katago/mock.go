@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/vmanke/goteach/board"
-	"github.com/vmanke/goteach/strength"
+	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/strength"
 )
 
 // Mock ist ein deterministischer Ersatz-Analyzer OHNE KataGo-Binary.

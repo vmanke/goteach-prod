@@ -7,7 +7,7 @@ package strength
 import (
 	"math"
 
-	"github.com/vmanke/goteach/board"
+	"github.com/vmanke/goteach-prod/board"
 )
 
 // Distances liefert per Multi-Source-BFS die Gitterdistanz jedes Punkts zur

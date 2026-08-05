@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vmanke/goteach/board"
-	"github.com/vmanke/goteach/katago"
+	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/katago"
 )
 
 const demoSGF = "(;GM[1]FF[4]SZ[19]KM[7.5]RU[Chinese]" +

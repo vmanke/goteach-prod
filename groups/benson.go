@@ -1,7 +1,7 @@
 package groups
 
 import (
-	"github.com/vmanke/goteach/board"
+	"github.com/vmanke/goteach-prod/board"
 )
 
 // UnconditionallyAlive implementiert Bensons Algorithmus (Benson 1976,

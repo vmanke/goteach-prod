@@ -17,10 +17,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vmanke/goteach/board"
-	"github.com/vmanke/goteach/internal/dotenv"
-	"github.com/vmanke/goteach/katago"
-	"github.com/vmanke/goteach/teaching"
+	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/internal/dotenv"
+	"github.com/vmanke/goteach-prod/katago"
+	"github.com/vmanke/goteach-prod/teaching"
 )
 
 func main() {

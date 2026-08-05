@@ -5,7 +5,7 @@
 package groups
 
 import (
-	"github.com/vmanke/goteach/board"
+	"github.com/vmanke/goteach-prod/board"
 )
 
 // Chain ist eine maximal verbundene Steinkette einer Farbe.

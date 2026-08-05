@@ -17,10 +17,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vmanke/goteach/board"
-	"github.com/vmanke/goteach/groups"
-	"github.com/vmanke/goteach/katago"
-	"github.com/vmanke/goteach/strength"
+	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/groups"
+	"github.com/vmanke/goteach-prod/katago"
+	"github.com/vmanke/goteach-prod/strength"
 )
 
 // Options steuert die Analyse.
