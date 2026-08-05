@@ -33,6 +33,10 @@ func FromJSON(data []byte) (*Position, error) {
 		p.Size = len(p.Rows)
 	}
 
+	if err := p.checkSize(); err != nil {
+		return nil, err
+	}
+
 	if len(p.Rows) != p.Size {
 		return nil, fmt.Errorf("vision: %d Zeilen, %d erwartet",
 			len(p.Rows), p.Size)
@@ -41,8 +45,25 @@ func FromJSON(data []byte) (*Position, error) {
 	return &p, nil
 }
 
+// checkSize hält die Brettgröße in den von board.New zugelassenen Grenzen.
+// board.New paniert außerhalb 2..25; da Positionen aus fremdem JSON stammen,
+// darf ungültige Eingabe niemals als Panic durchschlagen.
+func (p *Position) checkSize() error {
+	if p.Size < 2 || p.Size > 25 {
+		return fmt.Errorf("vision: unzulässige Brettgröße %d (erlaubt 2–25)",
+			p.Size)
+	}
+
+	return nil
+}
+
 // Board materialisiert die Position als Brett.
 func (p *Position) Board() (*board.Board, error) {
+	// Auch direkt konstruierte Positionen (ohne FromJSON) prüfen.
+	if err := p.checkSize(); err != nil {
+		return nil, err
+	}
+
 	b := board.New(p.Size)
 
 	for y, row := range p.Rows {
