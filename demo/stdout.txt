@@ -1,0 +1,54 @@
+Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Schwarz: 50.0 % → 77.5 %.
+Engine-Erstwahl: A19.
+Schwarze Kette um Q16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.00 → 0.38.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 2 — Weiß D4 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Weiß: 22.5 % → 50.0 %.
+Engine-Erstwahl: Q18.
+Weiße Kette um D4 (1 Stein(e), 4 Freiheit(en)): Stärke -0.00 → 0.38.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 3 — Schwarz Q3 [ausgezeichnet, +11.9 Pkt]. Gewinnchance Schwarz: 50.0 % → 74.0 %.
+Engine-Erstwahl: O16.
+Schwarze Kette um Q3 (1 Stein(e), 4 Freiheit(en)): Stärke -0.01 → 0.38.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 4 — Weiß D16 [ausgezeichnet, +12.6 Pkt]. Gewinnchance Weiß: 26.0 % → 51.6 %.
+Engine-Erstwahl: G4.
+Weiße Kette um D16 (1 Stein(e), 4 Freiheit(en)): Stärke -0.00 → 0.37.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 5 — Schwarz R9 [ausgezeichnet, +7.3 Pkt]. Gewinnchance Schwarz: 48.4 % → 64.4 %.
+Engine-Erstwahl: G16.
+Schwarze Kette um R9 (1 Stein(e), 4 Freiheit(en)): Stärke 0.19 → 0.43.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 6 — Weiß O17 [ausgezeichnet, +11.8 Pkt]. Gewinnchance Weiß: 35.6 % → 61.5 %.
+Engine-Erstwahl: G16.
+Weiße Kette um O17 (1 Stein(e), 4 Freiheit(en)): Stärke -0.28 → 0.09.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 7 — Schwarz Q14 [ausgezeichnet, +3.2 Pkt]. Gewinnchance Schwarz: 38.5 % → 45.6 %.
+Engine-Erstwahl: P17.
+Schwarze Kette um Q14 (1 Stein(e), 4 Freiheit(en)): Stärke 0.18 → 0.28.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 8 — Weiß K16 [ausgezeichnet, +6.1 Pkt]. Gewinnchance Weiß: 54.4 % → 67.2 %.
+Engine-Erstwahl: P17.
+Weiße Kette um K16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.12 → 0.31.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 9 — Schwarz C14 [ausgezeichnet, +12.4 Pkt]. Gewinnchance Schwarz: 32.8 % → 59.7 %.
+Engine-Erstwahl: P17.
+Schwarze Kette um C14 (1 Stein(e), 4 Freiheit(en)): Stärke -0.34 → 0.04.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zug 10 — Weiß C12 [ausgezeichnet, +6.6 Pkt]. Gewinnchance Weiß: 40.3 % → 54.9 %.
+Engine-Erstwahl: P17.
+Weiße Kette um C12 (1 Stein(e), 4 Freiheit(en)): Stärke -0.06 → 0.19.
+Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+
+Zusammenfassung
+---------------
+Schwarz: ausgezeichnet ×5 | Ø Punktverlust -9.82
+Weiß: ausgezeichnet ×5 | Ø Punktverlust -10.26

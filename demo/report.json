@@ -1,0 +1,252 @@
+[
+  {
+    "number": 1,
+    "player": "Schwarz",
+    "coord": "Q16",
+    "winrateBefore": 0.5,
+    "winrateAfter": 0.7749074161732111,
+    "pointsLost": -14.20729060405584,
+    "category": "ausgezeichnet",
+    "bestMove": "A19",
+    "bestPV": [
+      "A19"
+    ],
+    "effects": [
+      {
+        "color": "Schwarz",
+        "rep": "Q16",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": 0,
+        "strengthAfter": 0.38143756887840563,
+        "new": true
+      }
+    ],
+    "text": "Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Schwarz: 50.0 % → 77.5 %.\nEngine-Erstwahl: A19.\nSchwarze Kette um Q16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.00 → 0.38.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 2,
+    "player": "Weiß",
+    "coord": "D4",
+    "winrateBefore": 0.22509258382678887,
+    "winrateAfter": 0.5,
+    "pointsLost": -14.207290604055842,
+    "category": "ausgezeichnet",
+    "bestMove": "Q18",
+    "bestPV": [
+      "Q18"
+    ],
+    "effects": [
+      {
+        "color": "Weiß",
+        "rep": "D4",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": -0.0020801723466186456,
+        "strengthAfter": 0.37939035603433885,
+        "new": true
+      }
+    ],
+    "text": "Zug 2 — Weiß D4 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Weiß: 22.5 % → 50.0 %.\nEngine-Erstwahl: Q18.\nWeiße Kette um D4 (1 Stein(e), 4 Freiheit(en)): Stärke -0.00 → 0.38.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 3,
+    "player": "Schwarz",
+    "coord": "Q3",
+    "winrateBefore": 0.49999999999999994,
+    "winrateAfter": 0.7399382894608847,
+    "pointsLost": -11.892008107685378,
+    "category": "ausgezeichnet",
+    "bestMove": "O16",
+    "bestPV": [
+      "O16"
+    ],
+    "effects": [
+      {
+        "color": "Schwarz",
+        "rep": "Q3",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": -0.005729396812678469,
+        "strengthAfter": 0.37635197927989394,
+        "new": true
+      }
+    ],
+    "text": "Zug 3 — Schwarz Q3 [ausgezeichnet, +11.9 Pkt]. Gewinnchance Schwarz: 50.0 % → 74.0 %.\nEngine-Erstwahl: O16.\nSchwarze Kette um Q3 (1 Stein(e), 4 Freiheit(en)): Stärke -0.01 → 0.38.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 4,
+    "player": "Weiß",
+    "coord": "D16",
+    "winrateBefore": 0.2600617105391153,
+    "winrateAfter": 0.5161502710058746,
+    "pointsLost": -12.610106352956956,
+    "category": "ausgezeichnet",
+    "bestMove": "G4",
+    "bestPV": [
+      "G4"
+    ],
+    "effects": [
+      {
+        "color": "Weiß",
+        "rep": "D16",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": -0.0007629240174908982,
+        "strengthAfter": 0.36799792880885857,
+        "new": true
+      }
+    ],
+    "text": "Zug 4 — Weiß D16 [ausgezeichnet, +12.6 Pkt]. Gewinnchance Weiß: 26.0 % → 51.6 %.\nEngine-Erstwahl: G4.\nWeiße Kette um D16 (1 Stein(e), 4 Freiheit(en)): Stärke -0.00 → 0.37.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 5,
+    "player": "Schwarz",
+    "coord": "R9",
+    "winrateBefore": 0.48384972899412537,
+    "winrateAfter": 0.6438717321505012,
+    "pointsLost": -7.344689913295916,
+    "category": "ausgezeichnet",
+    "bestMove": "G16",
+    "bestPV": [
+      "G16"
+    ],
+    "effects": [
+      {
+        "color": "Schwarz",
+        "rep": "R9",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": 0.18954180112520722,
+        "strengthAfter": 0.43376163953375213,
+        "new": true
+      }
+    ],
+    "text": "Zug 5 — Schwarz R9 [ausgezeichnet, +7.3 Pkt]. Gewinnchance Schwarz: 48.4 % → 64.4 %.\nEngine-Erstwahl: G16.\nSchwarze Kette um R9 (1 Stein(e), 4 Freiheit(en)): Stärke 0.19 → 0.43.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 6,
+    "player": "Weiß",
+    "coord": "O17",
+    "winrateBefore": 0.3561282678494988,
+    "winrateAfter": 0.614523243462219,
+    "pointsLost": -11.83088050908446,
+    "category": "ausgezeichnet",
+    "bestMove": "G16",
+    "bestPV": [
+      "G16"
+    ],
+    "effects": [
+      {
+        "color": "Weiß",
+        "rep": "O17",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": -0.2829796305573689,
+        "strengthAfter": 0.08618870928810266,
+        "new": true
+      }
+    ],
+    "text": "Zug 6 — Weiß O17 [ausgezeichnet, +11.8 Pkt]. Gewinnchance Weiß: 35.6 % → 61.5 %.\nEngine-Erstwahl: G16.\nWeiße Kette um O17 (1 Stein(e), 4 Freiheit(en)): Stärke -0.28 → 0.09.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 7,
+    "player": "Schwarz",
+    "coord": "Q14",
+    "winrateBefore": 0.3854767565377811,
+    "winrateAfter": 0.4559217869833063,
+    "pointsLost": -3.238955516510412,
+    "category": "ausgezeichnet",
+    "bestMove": "P17",
+    "bestPV": [
+      "P17"
+    ],
+    "effects": [
+      {
+        "color": "Schwarz",
+        "rep": "Q14",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": 0.17642740543021307,
+        "strengthAfter": 0.2828396915574067,
+        "new": true
+      }
+    ],
+    "text": "Zug 7 — Schwarz Q14 [ausgezeichnet, +3.2 Pkt]. Gewinnchance Schwarz: 38.5 % → 45.6 %.\nEngine-Erstwahl: P17.\nSchwarze Kette um Q14 (1 Stein(e), 4 Freiheit(en)): Stärke 0.18 → 0.28.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 8,
+    "player": "Weiß",
+    "coord": "K16",
+    "winrateBefore": 0.5440782130166937,
+    "winrateAfter": 0.672198529400206,
+    "pointsLost": -6.0981916441541415,
+    "category": "ausgezeichnet",
+    "bestMove": "P17",
+    "bestPV": [
+      "P17"
+    ],
+    "effects": [
+      {
+        "color": "Weiß",
+        "rep": "K16",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": 0.11961693572420892,
+        "strengthAfter": 0.313539194204139,
+        "new": true
+      }
+    ],
+    "text": "Zug 8 — Weiß K16 [ausgezeichnet, +6.1 Pkt]. Gewinnchance Weiß: 54.4 % → 67.2 %.\nEngine-Erstwahl: P17.\nWeiße Kette um K16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.12 → 0.31.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 9,
+    "player": "Schwarz",
+    "coord": "C14",
+    "winrateBefore": 0.32780147059979403,
+    "winrateAfter": 0.5968091788474726,
+    "pointsLost": -12.434439073444267,
+    "category": "ausgezeichnet",
+    "bestMove": "P17",
+    "bestPV": [
+      "P17"
+    ],
+    "effects": [
+      {
+        "color": "Schwarz",
+        "rep": "C14",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": -0.34226068034305884,
+        "strengthAfter": 0.03906609679812801,
+        "new": true
+      }
+    ],
+    "text": "Zug 9 — Schwarz C14 [ausgezeichnet, +12.4 Pkt]. Gewinnchance Schwarz: 32.8 % → 59.7 %.\nEngine-Erstwahl: P17.\nSchwarze Kette um C14 (1 Stein(e), 4 Freiheit(en)): Stärke -0.34 → 0.04.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  },
+  {
+    "number": 10,
+    "player": "Weiß",
+    "coord": "C12",
+    "winrateBefore": 0.40319082115252736,
+    "winrateAfter": 0.5491701230608985,
+    "pointsLost": -6.565012858468998,
+    "category": "ausgezeichnet",
+    "bestMove": "P17",
+    "bestPV": [
+      "P17"
+    ],
+    "effects": [
+      {
+        "color": "Weiß",
+        "rep": "C12",
+        "stones": 1,
+        "liberties": 4,
+        "strengthBefore": -0.05596002867392335,
+        "strengthAfter": 0.19228703070116812,
+        "new": true
+      }
+    ],
+    "text": "Zug 10 — Weiß C12 [ausgezeichnet, +6.6 Pkt]. Gewinnchance Weiß: 40.3 % → 54.9 %.\nEngine-Erstwahl: P17.\nWeiße Kette um C12 (1 Stein(e), 4 Freiheit(en)): Stärke -0.06 → 0.19.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+  }
+]
