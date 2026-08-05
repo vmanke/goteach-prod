@@ -1,5 +1,6 @@
 .env
-goteach
+/goteach
 analysis_logs/
 *.log
-report.json
+!demo/*.log
+/report.json
