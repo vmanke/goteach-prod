@@ -21,14 +21,28 @@
   // wird in localStorage gemerkt (Head-Skript wendet sie vor dem Paint an).
   var themeToggle = document.getElementById('theme-toggle');
 
-  if (themeToggle) {
-    themeToggle.addEventListener('click', function () {
-      var root = document.documentElement;
-      var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      var current = root.dataset.theme || (systemDark ? 'dark' : 'light');
-      var next = current === 'dark' ? 'light' : 'dark';
+  function effectiveTheme() {
+    var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-      root.dataset.theme = next;
+    return document.documentElement.dataset.theme ||
+      (systemDark ? 'dark' : 'light');
+  }
+
+  function updateThemeLabel() {
+    if (themeToggle) {
+      themeToggle.textContent =
+        effectiveTheme() === 'dark' ? '☀ Hell' : '☾ Dunkel';
+    }
+  }
+
+  if (themeToggle) {
+    updateThemeLabel();
+
+    themeToggle.addEventListener('click', function () {
+      var next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+
+      document.documentElement.dataset.theme = next;
+      updateThemeLabel();
 
       try {
         localStorage.setItem('goteach-theme', next);
@@ -100,7 +114,7 @@
   function queryFromOptions() {
     var params = new URLSearchParams();
 
-    ['visits', 'tau', 'from', 'to', 'rules', 'komi'].forEach(function (name) {
+    ['visits', 'tau', 'from', 'to', 'rules', 'komi', 'ogs'].forEach(function (name) {
       var field = form.elements.namedItem(name);
       var value = field && field.value ? String(field.value).trim() : '';
 
@@ -177,8 +191,12 @@
     setStatus('', false);
 
     readSGF().then(function (sgf) {
-      if (!sgf) {
-        setStatus('Bitte eine SGF-Datei wählen oder SGF-Text einfügen.', true);
+      var ogsField = form.elements.namedItem('ogs');
+      var ogsRef = ogsField && ogsField.value ? ogsField.value.trim() : '';
+
+      if (!sgf && !ogsRef) {
+        setStatus('Bitte SGF-Datei wählen, SGF-Text einfügen ' +
+          'oder eine OGS-Partie angeben.', true);
 
         return null;
       }

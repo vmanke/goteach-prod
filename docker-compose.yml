@@ -1,0 +1,11 @@
+# goteach mit echter KataGo-Engine: docker compose up --build
+services:
+  goteach:
+    build:
+      context: .
+      # Für CPUs ohne AVX2 einkommentieren:
+      # args:
+      #   KATAGO_FLAVOR: eigen
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

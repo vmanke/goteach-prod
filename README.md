@@ -100,12 +100,16 @@ PORT=8080 ./goteach-server
 | `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
 | `GET /app.js`, `GET /style.css`, `GET /favicon.svg` | eingebettete Assets     |
 
-`POST /analyze` akzeptiert das SGF auf drei Wegen:
+`POST /analyze` akzeptiert die Partie auf vier Wegen:
 
 - **roher Body** (wie bisher): `curl --data-binary @partie.sgf …/analyze`
 - **Datei-Upload** (multipart, Feld `sgf`): `curl -F "sgf=@partie.sgf" …/analyze`
 - **Formularfeld** `sgf` (URL-kodiert) — so funktioniert das Formular der
   Startseite auch ohne JavaScript
+- **OGS-Import** (Parameter `ogs`, URL oder Partie-ID): der Server lädt das
+  SGF öffentlicher Partien von online-go.com
+  (`curl -X POST "…/analyze?ogs=https://online-go.com/game/12345678"`);
+  ein mitgeliefertes SGF hat Vorrang
 
 Query-Parameter: `visits` (Default 50, Deckel 1000), `tau`, `from`, `to`,
 `rules`, `komi`; bei Formular-/Multipart-Posts auch als Formularfelder
@@ -124,16 +128,60 @@ Engine-Wahl über Umgebung: Sind `KATAGO_PATH` und `KATAGO_MODEL` gesetzt
 eine echte Engine. Andernfalls antwortet der Mock — die Antwort trägt
 dann `"synthetic": true` und die Werte sind **keine echte Analyse**.
 
+### Docker: echte KataGo-Engine
+
+Vercel-Functions haben keine GPU und taugen nicht als Engine-Host — dort
+läuft der Mock. Für echte Analysen bündelt das `Dockerfile` alles in
+einen Container: Go-Server, KataGo (CPU/Eigen, AVX2) und ein starkes,
+kleines Transformer-Netz (`b10c384h6nbttflrs`, 36 MB) aus dem offiziellen
+KataGo-Release v1.17.1.
+
+```bash
+docker build -t goteach .
+docker run -p 8080:8080 goteach          # oder: docker compose up --build
+curl --data-binary @partie.sgf "http://localhost:8080/analyze?visits=50"
+```
+
+**Zugriff auf KataGo:** direkt nie — der Server startet KataGo pro
+`/analyze`-Anfrage als Kindprozess (Analysis Engine, JSON über
+stdin/stdout). Die Umgebungsvariablen sind im Image vorbelegt
+(`KATAGO_PATH=/app/katago/AppRun`, `KATAGO_MODEL=/app/net.bin.gz`,
+`KATAGO_CONFIG=/app/analysis.cfg`) und lassen sich per `-e`/Volume
+überschreiben, z. B. für ein anderes Netz. Nach außen bleibt alles die
+gewohnte HTTP-API; Antworten tragen dann `"synthetic": false`.
+
+Hinweise:
+
+- **CPU-Kosten:** Der Engine-Start pro Anfrage lädt das Netz (≈ 10–20 s
+  auf CPU); Analysen skalieren mit Visits × Stellungen. Mit `visits`,
+  `from`/`to` dosieren; `numAnalysisThreads`/`numSearchThreadsPerAnalysisThread`
+  in `analysis.cfg` an die vCPUs anpassen.
+- **CPU ohne AVX2:** mit `--build-arg KATAGO_FLAVOR=eigen` bauen. Die
+  Release-Binaries sind x64; auf ARM (z. B. Apple Silicon) KataGo selbst
+  kompilieren oder auf einem x64-Host deployen.
+- **Arbeitsteilung:** Vercel bleibt Frontend/Demo (Mock), der
+  Docker-Host (VPS, Fly.io, Railway …) liefert die echte Analyse.
+
 ### Vercel-Deployment
 
 Vercels Go-Support baut den Server nur im **Standalone-Modus**, wenn das
 Framework-Preset `go` ist; andernfalls greift der alte
 Serverless-Function-Builder, baut das falsche Ziel und jede Anfrage endet
 mit `FUNCTION_INVOCATION_FAILED`. Die `vercel.json` im Repo pinnt deshalb
-`"framework": "go"` — das überstimmt die Projekteinstellung bei jedem
-Deployment. Erwartete Entrypoints sind `main.go`, `cmd/api/main.go` oder
-`cmd/server/main.go`; der Server lauscht auf dem `PORT` aus der Umgebung.
-Das Root Directory des Vercel-Projekts muss auf die Repo-Wurzel zeigen.
+beides — das überstimmt die Projekteinstellungen bei jedem Deployment:
+
+- `"framework": "go"` erzwingt den Standalone-Modus;
+- `"buildCommand": "go build -o \"$VERCEL_OUTPUT_FILE\" ."` baut garantiert
+  den Server aus der Repo-Wurzel. Wichtig, weil auch der Standalone-Modus
+  einen Build-Command-Override aus den Projekteinstellungen ehrt — steht
+  dort z. B. die CLI-Buildzeile aus diesem README, deployt Vercel die CLI,
+  die sofort mit der Flag-Usage endet (genau dieses Fehlerbild gab es).
+
+Im Vercel-Dashboard sollten Install-/Build-Command-Overrides trotzdem
+**aus** sein und keine `KATAGO_*`-Variablen gesetzt werden (Functions
+haben keine Engine; ohne die Variablen antwortet der Mock). Der Server
+lauscht auf dem `PORT` aus der Umgebung; das Root Directory des Projekts
+muss auf die Repo-Wurzel zeigen.
 
 ## LLM-Feinschliff (optional)
 

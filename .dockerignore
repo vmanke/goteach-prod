@@ -1,0 +1,10 @@
+# Niemals ins Image: Secrets und lokale Artefakte.
+.env
+.git
+/goteach
+/goteach-server
+/report.json
+analysis_logs/
+*.log
+Dockerfile
+docker-compose.yml
