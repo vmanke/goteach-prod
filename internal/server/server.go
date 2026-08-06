@@ -60,6 +60,8 @@ func Run() error {
 		Addr:              ":" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	log.Printf("goteach-server: lausche auf :%s (KataGo konfiguriert: %v)",
@@ -80,6 +82,13 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
+
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "goteach",
 		"katago":  katagoConfigured(),
@@ -90,6 +99,13 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
+
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, "ok\n")
 }
@@ -168,7 +184,11 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		an = eng
 	}
 
-	defer an.Close()
+	defer func() {
+		if err := an.Close(); err != nil {
+			log.Printf("goteach-server: Analyzer schließen: %v", err)
+		}
+	}()
 
 	reports, err := teaching.Analyze(game, an, opt)
 
@@ -178,10 +198,24 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Effektive Werte melden: Query-Parameter (opt) überschreiben die
+	// SGF-Werte – genau wie in teaching.Analyze für die Analyse verwendet.
+	effKomi := game.Komi
+
+	if opt.Komi != nil {
+		effKomi = *opt.Komi
+	}
+
+	effRules := game.Rules
+
+	if opt.Rules != "" {
+		effRules = opt.Rules
+	}
+
 	writeJSON(w, http.StatusOK, analyzeResponse{
 		Size:      game.Size,
-		Komi:      game.Komi,
-		Rules:     game.Rules,
+		Komi:      effKomi,
+		Rules:     effRules,
 		Moves:     len(game.Moves),
 		Synthetic: synthetic,
 		Reports:   reports,
@@ -232,7 +266,7 @@ func optionsFromQuery(r *http.Request) (teaching.Options, error) {
 	if v := q.Get("komi"); v != "" {
 		komi, err := strconv.ParseFloat(v, 64)
 
-		if err != nil || math.IsNaN(komi) {
+		if err != nil || math.IsNaN(komi) || math.IsInf(komi, 0) {
 			return opt, fmt.Errorf("komi ungültig: %q", v)
 		}
 
