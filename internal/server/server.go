@@ -119,10 +119,7 @@ func katagoConfigured() bool {
 
 // handleInfo liefert die Dienstinfo als JSON (GET /api).
 func handleInfo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
-
+	if !allowGetHead(w, r) {
 		return
 	}
 
@@ -142,10 +139,7 @@ func serveInfo(w http.ResponseWriter) {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
-
+	if !allowGetHead(w, r) {
 		return
 	}
 
@@ -381,11 +375,15 @@ func bodyErrStatus(err error) int {
 }
 
 // valuesGetter liest einen Parameter aus der Query, sonst aus den
-// Formularwerten; leere Formularwerte werden übersprungen.
+// Formularwerten. Ein in der Query vorhandener Schlüssel gewinnt auch mit
+// leerem Wert (?rules= leert also ein Formularfeld explizit); leere
+// Formularwerte werden übersprungen.
 func valuesGetter(r *http.Request, values url.Values) func(string) string {
+	query := r.URL.Query()
+
 	return func(key string) string {
-		if v := r.URL.Query().Get(key); v != "" {
-			return v
+		if vs, ok := query[key]; ok && len(vs) > 0 {
+			return vs[0]
 		}
 
 		return firstNonEmpty(values[key])

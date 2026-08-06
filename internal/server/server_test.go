@@ -294,6 +294,42 @@ func TestAnalyzeInvalidVisits(t *testing.T) {
 	}
 }
 
+func TestValuesGetterQueryWins(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/analyze?rules=&visits=10", nil)
+	get := valuesGetter(req, url.Values{
+		"rules":  {"chinese"},
+		"visits": {"99"},
+		"komi":   {"6.5"},
+	})
+
+	if got := get("rules"); got != "" {
+		t.Errorf("rules = %q, leerer Query-Wert muss Formularwert überstimmen", got)
+	}
+
+	if got := get("visits"); got != "10" {
+		t.Errorf("visits = %q, Query muss gewinnen", got)
+	}
+
+	if got := get("komi"); got != "6.5" {
+		t.Errorf("komi = %q, ohne Query-Schlüssel gilt das Formular", got)
+	}
+}
+
+func TestSEOEndpointsMethodNotAllowed(t *testing.T) {
+	for _, path := range []string{"/robots.txt", "/sitemap.xml"} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		rr := serve(t, req)
+
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s: Status = %d, erwartet 405", path, rr.Code)
+		}
+
+		if allow := rr.Header().Get("Allow"); allow != "GET, HEAD" {
+			t.Errorf("%s: Allow = %q, erwartet \"GET, HEAD\"", path, allow)
+		}
+	}
+}
+
 func TestRobotsAndSitemap(t *testing.T) {
 	rr := serve(t, httptest.NewRequest(http.MethodGet, "/robots.txt", nil))
 

@@ -57,10 +57,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
-
+	if !allowGetHead(w, r) {
 		return
 	}
 
@@ -77,7 +74,7 @@ func renderHome(w http.ResponseWriter, r *http.Request) {
 	base := baseURL(r)
 	canonical := base + "/"
 
-	// Hydration-Zustand für assets/app.js; json.Marshal escapt <, > und &,
+	// Hydration-Zustand für assets/app.js; json.Marshal maskiert <, > und &,
 	// daher kann der Inhalt kein </script> enthalten.
 	state, err := json.Marshal(map[string]any{
 		"katago":        katagoConfigured(),
@@ -143,12 +140,20 @@ func renderHome(w http.ResponseWriter, r *http.Request) {
 var xmlEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 func handleRobots(w http.ResponseWriter, r *http.Request) {
+	if !allowGetHead(w, r) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n",
 		baseURL(r))
 }
 
 func handleSitemap(w http.ResponseWriter, r *http.Request) {
+	if !allowGetHead(w, r) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -157,13 +162,22 @@ func handleSitemap(w http.ResponseWriter, r *http.Request) {
 `, xmlEscape.Replace(baseURL(r)))
 }
 
+// allowGetHead lässt nur GET/HEAD durch; sonst 405 mit Allow-Header.
+func allowGetHead(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+
+	w.Header().Set("Allow", "GET, HEAD")
+	httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
+
+	return false
+}
+
 // handleAsset liefert eine eingebettete statische Datei aus assets/.
 func handleAsset(name, contentType string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
-
+		if !allowGetHead(w, r) {
 			return
 		}
 
