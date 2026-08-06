@@ -164,10 +164,20 @@ Vercels Go-Support baut den Server nur im **Standalone-Modus**, wenn das
 Framework-Preset `go` ist; andernfalls greift der alte
 Serverless-Function-Builder, baut das falsche Ziel und jede Anfrage endet
 mit `FUNCTION_INVOCATION_FAILED`. Die `vercel.json` im Repo pinnt deshalb
-`"framework": "go"` — das überstimmt die Projekteinstellung bei jedem
-Deployment. Erwartete Entrypoints sind `main.go`, `cmd/api/main.go` oder
-`cmd/server/main.go`; der Server lauscht auf dem `PORT` aus der Umgebung.
-Das Root Directory des Vercel-Projekts muss auf die Repo-Wurzel zeigen.
+beides — das überstimmt die Projekteinstellungen bei jedem Deployment:
+
+- `"framework": "go"` erzwingt den Standalone-Modus;
+- `"buildCommand": "go build -o \"$VERCEL_OUTPUT_FILE\" ."` baut garantiert
+  den Server aus der Repo-Wurzel. Wichtig, weil auch der Standalone-Modus
+  einen Build-Command-Override aus den Projekteinstellungen ehrt — steht
+  dort z. B. die CLI-Buildzeile aus diesem README, deployt Vercel die CLI,
+  die sofort mit der Flag-Usage endet (genau dieses Fehlerbild gab es).
+
+Im Vercel-Dashboard sollten Install-/Build-Command-Overrides trotzdem
+**aus** sein und keine `KATAGO_*`-Variablen gesetzt werden (Functions
+haben keine Engine; ohne die Variablen antwortet der Mock). Der Server
+lauscht auf dem `PORT` aus der Umgebung; das Root Directory des Projekts
+muss auf die Repo-Wurzel zeigen.
 
 ## LLM-Feinschliff (optional)
 
