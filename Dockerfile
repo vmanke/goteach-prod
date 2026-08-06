@@ -21,9 +21,10 @@ ARG KATAGO_NET=b10c384h6nbttflrs.bin.gz
 
 # Gepinnte SHA256-Summen der Release-Assets (Supply-Chain-Schutz); Quelle:
 # Asset-Digests auf github.com/lightvector/KataGo/releases/tag/v1.17.1.
-# Wer KATAGO_VERSION/KATAGO_FLAVOR/KATAGO_NET ändert, MUSS die passenden
-# Summen mitliefern.
-ARG KATAGO_SHA256=234bf7866bc26f37baaeed60dc358b821bafc8e73e9bc50cb2d2a1cf51502d44
+# KATAGO_ZIP_SHA256 gehört zum Binary-Zip (katago-v…-linux-x64.zip),
+# KATAGO_NET_SHA256 zum Netz (KATAGO_NET). Wer KATAGO_VERSION/KATAGO_FLAVOR/
+# KATAGO_NET ändert, MUSS die jeweils passende Summe mitliefern.
+ARG KATAGO_ZIP_SHA256=234bf7866bc26f37baaeed60dc358b821bafc8e73e9bc50cb2d2a1cf51502d44
 ARG KATAGO_NET_SHA256=0ba27eced5180b3e3d0b898b280c541112989765e789d1eb6cd0d31b2b2c1229
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -33,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /katago
 
 RUN curl -fSL -o katago.zip "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/katago-v${KATAGO_VERSION}-${KATAGO_FLAVOR}-linux-x64.zip" \
- && echo "${KATAGO_SHA256}  katago.zip" | sha256sum -c - \
+ && echo "${KATAGO_ZIP_SHA256}  katago.zip" | sha256sum -c - \
  && unzip -q katago.zip katago \
  && rm katago.zip
 
