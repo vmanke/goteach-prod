@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -131,8 +132,9 @@ func serveInfo(w http.ResponseWriter) {
 		"service":  "goteach",
 		"katago":   katagoConfigured(),
 		"frontend": "GET / (HTML im Browser)",
-		"analyze": "POST /analyze mit SGF (roh, Formularfeld oder Datei-Upload \"sgf\"); " +
-			"Parameter: visits, tau, from, to, rules, komi; download=1 für Datei-Download",
+		"analyze": "POST /analyze mit SGF (roh, Formularfeld oder Datei-Upload \"sgf\") " +
+			"oder ogs=<URL|ID> (online-go.com); Parameter: visits, tau, from, to, " +
+			"rules, komi; download=1 für Datei-Download",
 		"warnung": "ohne konfigurierte KataGo-Engine sind alle Werte synthetisch (Mock)",
 		"healthz": "GET /healthz",
 	})
@@ -173,11 +175,32 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ohne eigenes SGF darf die Partie per "ogs" von online-go.com kommen;
+	// ein mitgeliefertes SGF hat immer Vorrang.
 	if len(data) == 0 {
-		httpError(w, http.StatusBadRequest,
-			"kein SGF übergeben (roher Body, Formularfeld oder Datei-Upload \"sgf\")")
+		ref := strings.TrimSpace(get("ogs"))
 
-		return
+		if ref == "" {
+			httpError(w, http.StatusBadRequest,
+				"kein SGF übergeben (roher Body, Formularfeld oder Datei-Upload "+
+					"\"sgf\") und keine OGS-Partie (Parameter \"ogs\")")
+
+			return
+		}
+
+		id, err := parseOGSGameID(ref)
+
+		if err != nil {
+			httpError(w, http.StatusBadRequest, "%v", err)
+
+			return
+		}
+
+		if data, err = fetchOGSSGF(id); err != nil {
+			httpError(w, http.StatusBadGateway, "OGS: %v", err)
+
+			return
+		}
 	}
 
 	if len(data) > maxSGFBytes {
@@ -361,6 +384,73 @@ func sgfFromRequest(w http.ResponseWriter, r *http.Request) (
 	}
 
 	return data, queryOnly, 0, nil
+}
+
+// ogsBaseURL ist Variable statt Konstante, damit Tests einen Stub-Server
+// einsetzen können. Abgefragt wird ausschließlich der SGF-Export der
+// öffentlichen OGS-API: /api/v1/games/<id>/sgf.
+var ogsBaseURL = "https://online-go.com"
+
+var ogsClient = &http.Client{Timeout: 15 * time.Second}
+
+// ogsRefPattern akzeptiert Partie-URLs von online-go.com; die ID wird als
+// reine Ziffernfolge extrahiert — nie eine Nutzer-URL abgerufen (kein SSRF).
+var ogsRefPattern = regexp.MustCompile(
+	`^(?:https?://)?(?:www\.)?online-go\.com/game/(?:view/)?([0-9]+)(?:[/?#].*)?$`)
+
+// parseOGSGameID macht aus "12345678" oder "https://online-go.com/game/12345678"
+// eine validierte Partie-ID.
+func parseOGSGameID(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+
+	if ref != "" && strings.Trim(ref, "0123456789") == "" {
+		return ref, nil
+	}
+
+	if m := ogsRefPattern.FindStringSubmatch(ref); m != nil {
+		return m[1], nil
+	}
+
+	return "", fmt.Errorf(
+		"OGS-Referenz unverständlich: %q (erwartet Partie-ID oder online-go.com/game/<id>)",
+		ref)
+}
+
+// fetchOGSSGF lädt das SGF einer öffentlichen OGS-Partie.
+func fetchOGSSGF(id string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet,
+		ogsBaseURL+"/api/v1/games/"+id+"/sgf", nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent",
+		"goteach (+https://github.com/vmanke/goteach-prod)")
+
+	resp, err := ogsClient.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d für Partie %s", resp.StatusCode, id)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSGFBytes+1))
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(data) > maxSGFBytes {
+		return nil, fmt.Errorf("SGF größer als %d Bytes", maxSGFBytes)
+	}
+
+	return data, nil
 }
 
 // bodyErrStatus unterscheidet „Body zu groß" (413) von „Body kaputt" (400).

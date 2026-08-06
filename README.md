@@ -100,12 +100,16 @@ PORT=8080 ./goteach-server
 | `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
 | `GET /app.js`, `GET /style.css`, `GET /favicon.svg` | eingebettete Assets     |
 
-`POST /analyze` akzeptiert das SGF auf drei Wegen:
+`POST /analyze` akzeptiert die Partie auf vier Wegen:
 
 - **roher Body** (wie bisher): `curl --data-binary @partie.sgf …/analyze`
 - **Datei-Upload** (multipart, Feld `sgf`): `curl -F "sgf=@partie.sgf" …/analyze`
 - **Formularfeld** `sgf` (URL-kodiert) — so funktioniert das Formular der
   Startseite auch ohne JavaScript
+- **OGS-Import** (Parameter `ogs`, URL oder Partie-ID): der Server lädt das
+  SGF öffentlicher Partien von online-go.com
+  (`curl -X POST "…/analyze?ogs=https://online-go.com/game/12345678"`);
+  ein mitgeliefertes SGF hat Vorrang
 
 Query-Parameter: `visits` (Default 50, Deckel 1000), `tau`, `from`, `to`,
 `rules`, `komi`; bei Formular-/Multipart-Posts auch als Formularfelder

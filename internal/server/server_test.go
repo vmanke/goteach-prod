@@ -294,6 +294,82 @@ func TestAnalyzeInvalidVisits(t *testing.T) {
 	}
 }
 
+func TestParseOGSGameID(t *testing.T) {
+	valid := map[string]string{
+		"12345678":                               "12345678",
+		"https://online-go.com/game/12345678":    "12345678",
+		"http://www.online-go.com/game/view/999": "999",
+		"online-go.com/game/42":                  "42",
+		"https://online-go.com/game/77?move=12":  "77",
+		"  https://online-go.com/game/1234/  ":   "1234",
+	}
+
+	for ref, want := range valid {
+		got, err := parseOGSGameID(ref)
+
+		if err != nil || got != want {
+			t.Errorf("parseOGSGameID(%q) = %q, %v — erwartet %q", ref, got, err, want)
+		}
+	}
+
+	invalid := []string{
+		"", "abc", "https://evil.example/game/1",
+		"https://online-go.com/review/123", "online-go.com.evil.example/game/1",
+	}
+
+	for _, ref := range invalid {
+		if got, err := parseOGSGameID(ref); err == nil {
+			t.Errorf("parseOGSGameID(%q) = %q, erwartet Fehler", ref, got)
+		}
+	}
+}
+
+func TestAnalyzeFromOGS(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/games/123/sgf" {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			_, _ = w.Write([]byte(demoSGF))
+		}))
+	defer stub.Close()
+
+	orig := ogsBaseURL
+	ogsBaseURL = stub.URL
+
+	defer func() { ogsBaseURL = orig }()
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/analyze?ogs="+url.QueryEscape("https://online-go.com/game/123"), nil)
+
+	rr := serve(t, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	if resp := decodeAnalyze(t, rr); resp.Moves != 10 {
+		t.Errorf("Moves = %d, erwartet 10", resp.Moves)
+	}
+
+	// Unbekannte Partie → 502 mit OGS-Hinweis.
+	req = httptest.NewRequest(http.MethodPost, "/analyze?ogs=999", nil)
+
+	if rr := serve(t, req); rr.Code != http.StatusBadGateway {
+		t.Errorf("unbekannte Partie: Status = %d, erwartet 502", rr.Code)
+	}
+
+	// Kaputte Referenz → 400.
+	req = httptest.NewRequest(http.MethodPost, "/analyze?ogs=nonsense", nil)
+
+	if rr := serve(t, req); rr.Code != http.StatusBadRequest {
+		t.Errorf("kaputte Referenz: Status = %d, erwartet 400", rr.Code)
+	}
+}
+
 func TestValuesGetterQueryWins(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/analyze?rules=&visits=10", nil)
 	get := valuesGetter(req, url.Values{

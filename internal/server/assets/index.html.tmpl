@@ -6,7 +6,8 @@
   <title>goteach — Go-Partien analysieren: Teaching pro Zug mit KataGo</title>
   <meta name="description" content="Go-Partien (SGF) analysieren: Für jeden Zug eine deutsche Lehreinheit mit Bewertung, Punktverlust, Gewinnchancen und Engine-Erstwahl. SGF hochladen, Report als JSON herunterladen.">
   <meta name="robots" content="index, follow">
-  <meta name="theme-color" content="#8a5a2b">
+  <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#131311" media="(prefers-color-scheme: dark)">
   <script>
     // Vor dem ersten Paint: gespeicherte Theme-Wahl anwenden (kein Flackern).
     try {
@@ -32,7 +33,8 @@
 <header class="site-header">
   <button type="button" id="theme-toggle" class="theme-toggle js-only"
           aria-label="Farbschema umschalten">◐ Theme</button>
-  <h1><span class="stone stone-black" aria-hidden="true"></span> goteach</h1>
+  <h1><span class="stone stone-black" aria-hidden="true"></span><span
+      class="stone stone-white" aria-hidden="true"></span> goteach</h1>
   <p class="tagline">Go-Analyse mit Teaching pro Zug — Bewertung, Punktverlust,
   Gewinnchancen und Engine-Erstwahl für jeden Zug Ihrer Partie.</p>
 </header>
@@ -62,6 +64,12 @@
         <span>Alternativ: SGF-Text einfügen</span>
         <textarea name="sgf" rows="4" spellcheck="false"
           placeholder="(;GM[1]FF[4]SZ[19]KM[7.5];B[pd];W[dp];…)"></textarea>
+      </label>
+
+      <label class="field">
+        <span>Oder: OGS-Partie laden (online-go.com, URL oder Partie-ID)</span>
+        <input type="text" name="ogs" spellcheck="false"
+          placeholder="https://online-go.com/game/12345678">
       </label>
 
       <details class="options">
@@ -124,7 +132,9 @@
     <p>Query-Parameter von <code>/analyze</code>: <code>visits</code>
     (Default 50, Deckel {{.MaxVisits}}), <code>tau</code>, <code>from</code>,
     <code>to</code>, <code>rules</code>, <code>komi</code>;
-    <code>download=1</code> liefert den Report als Datei-Download.</p>
+    <code>ogs=&lt;URL oder ID&gt;</code> lädt die Partie von online-go.com
+    statt aus dem Body; <code>download=1</code> liefert den Report als
+    Datei-Download.</p>
     <pre><code>curl -X POST --data-binary @partie.sgf \
   "{{.Base}}/analyze?visits=50&amp;download=1" -OJ</code></pre>
   </section>
