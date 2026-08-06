@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="de" data-js="pending">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>goteach — Go-Partien analysieren: Teaching pro Zug mit KataGo</title>
+  <meta name="description" content="Go-Partien (SGF) analysieren: Für jeden Zug eine deutsche Lehreinheit mit Bewertung, Punktverlust, Gewinnchancen und Engine-Erstwahl. SGF hochladen, Report als JSON herunterladen.">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#8a5a2b">
+  <script>
+    // Vor dem ersten Paint: gespeicherte Theme-Wahl anwenden (kein Flackern).
+    try {
+      var goteachTheme = localStorage.getItem('goteach-theme');
+      if (goteachTheme) { document.documentElement.dataset.theme = goteachTheme; }
+    } catch (e) { /* localStorage gesperrt: Systemeinstellung gilt */ }
+  </script>
+  <link rel="canonical" href="{{.Canonical}}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="goteach">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:url" content="{{.Canonical}}">
+  <meta property="og:title" content="goteach — Go-Partien analysieren: Teaching pro Zug">
+  <meta property="og:description" content="SGF hochladen, für jeden Zug eine deutsche Lehreinheit erhalten — Bewertung, Punktverlust, Gewinnchancen, Engine-Variante. Report als JSON herunterladen.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="goteach — Go-Partien analysieren: Teaching pro Zug">
+  <meta name="twitter:description" content="SGF hochladen, für jeden Zug eine deutsche Lehreinheit erhalten. Report als JSON herunterladen.">
+  <script type="application/ld+json">{{.LDJSON}}</script>
+</head>
+<body>
+<header class="site-header">
+  <button type="button" id="theme-toggle" class="theme-toggle js-only"
+          aria-label="Farbschema umschalten">◐ Theme</button>
+  <h1><span class="stone stone-black" aria-hidden="true"></span> goteach</h1>
+  <p class="tagline">Go-Analyse mit Teaching pro Zug — Bewertung, Punktverlust,
+  Gewinnchancen und Engine-Erstwahl für jeden Zug Ihrer Partie.</p>
+</header>
+
+<main>
+  {{if not .Katago}}
+  <aside class="banner banner-warn" role="note">
+    <strong>Hinweis:</strong> Auf dieser Instanz ist keine KataGo-Engine
+    konfiguriert. Alle Analysewerte sind <em>synthetisch</em>
+    (<code>"synthetic": true</code>) und taugen nicht als echtes Teaching —
+    die Pipeline lässt sich damit aber vollständig ausprobieren.
+  </aside>
+  {{end}}
+
+  <section class="card" id="upload" aria-labelledby="upload-title">
+    <h2 id="upload-title">SGF hochladen &amp; analysieren</h2>
+    <form id="analyze-form" action="/analyze" method="post" enctype="multipart/form-data">
+      <div id="dropzone" class="dropzone">
+        <label class="file-label">
+          <input type="file" name="sgf" accept=".sgf,application/x-go-sgf,text/plain">
+          <span>SGF-Datei wählen</span>
+        </label>
+        <p class="js-only drop-hint">… oder Datei hierher ziehen</p>
+      </div>
+
+      <label class="field">
+        <span>Alternativ: SGF-Text einfügen</span>
+        <textarea name="sgf" rows="4" spellcheck="false"
+          placeholder="(;GM[1]FF[4]SZ[19]KM[7.5];B[pd];W[dp];…)"></textarea>
+      </label>
+
+      <details class="options">
+        <summary>Analyse-Optionen</summary>
+        <div class="options-grid">
+          <label class="field"><span>Visits (max. {{.MaxVisits}})</span>
+            <input type="number" name="visits" min="1" max="{{.MaxVisits}}" placeholder="50"></label>
+          <label class="field"><span>Tau</span>
+            <input type="text" name="tau" inputmode="decimal" placeholder="3.0"></label>
+          <label class="field"><span>Von Zug</span>
+            <input type="number" name="from" min="1" placeholder="1"></label>
+          <label class="field"><span>Bis Zug (0 = Ende)</span>
+            <input type="number" name="to" min="0" placeholder="0"></label>
+          <label class="field"><span>Regeln</span>
+            <select name="rules">
+              <option value="">aus SGF</option>
+              <option value="chinese">chinese</option>
+              <option value="japanese">japanese</option>
+              <option value="korean">korean</option>
+              <option value="aga">aga</option>
+            </select></label>
+          <label class="field"><span>Komi</span>
+            <input type="text" name="komi" inputmode="decimal" placeholder="aus SGF"></label>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button type="submit" id="analyze-btn">Analysieren</button>
+        <label class="checkbox no-js-only">
+          <input type="checkbox" name="download" value="1">
+          <span>Report als Datei herunterladen</span>
+        </label>
+        <button type="button" id="download-btn" class="js-only secondary" hidden>
+          Report herunterladen (JSON)
+        </button>
+      </div>
+    </form>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="results" class="card" aria-labelledby="results-title" hidden>
+    <h2 id="results-title">Teaching-Report</h2>
+    <p id="results-summary" class="summary"></p>
+    <div id="results-list"></div>
+  </section>
+
+  <section class="card" aria-labelledby="api-title">
+    <h2 id="api-title">HTTP-API</h2>
+    <p>Der Dienst lässt sich auch direkt ansprechen:</p>
+    <table>
+      <thead><tr><th>Endpunkt</th><th>Funktion</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /api</code></td><td>Dienstinfo (JSON)</td></tr>
+        <tr><td><code>GET /healthz</code></td><td>Liveness-Check</td></tr>
+        <tr><td><code>POST /analyze</code></td>
+            <td>SGF im Body (roh, Formularfeld oder Datei-Upload
+                <code>sgf</code>) → Teaching-Reports als JSON</td></tr>
+      </tbody>
+    </table>
+    <p>Query-Parameter von <code>/analyze</code>: <code>visits</code>
+    (Default 50, Deckel {{.MaxVisits}}), <code>tau</code>, <code>from</code>,
+    <code>to</code>, <code>rules</code>, <code>komi</code>;
+    <code>download=1</code> liefert den Report als Datei-Download.</p>
+    <pre><code>curl -X POST --data-binary @partie.sgf \
+  "{{.Base}}/analyze?visits=50&amp;download=1" -OJ</code></pre>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>goteach — symbolischer Brettzustand, Bensons Leben (1976), KataGo-Ownership
+  und situatives Stärkemaß. Quellcode:
+  <a href="https://github.com/vmanke/goteach-prod" rel="noopener">GitHub</a>.</p>
+</footer>
+
+<script type="application/json" id="goteach-state">{{.State}}</script>
+<script src="/app.js" defer></script>
+</body>
+</html>

@@ -19,6 +19,7 @@ und einem faktenbasierten Merksatz.
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
 | `vision`           | Brücke zur Python/ONNX-Bilderkennung (Stufen 1–2), JSON-Stellungsformat |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
+| `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration)          |
 | `cmd/goteach`      | CLI                                                                     |
 
 ## Build & Tests
@@ -81,31 +82,58 @@ Weiß:    ausgezeichnet ×5 | Ø Punktverlust -10.26
 
 ## HTTP-Dienst (`internal/server`)
 
-Für Deployments (z. B. Vercel, das `main.go`, `cmd/api/main.go` oder
-`cmd/server/main.go` als Entrypoint erwartet) gibt es denselben
-Analyse-Kern als HTTP-Dienst. Die Logik liegt in `internal/server`;
-`main.go` (Repo-Wurzel) und `cmd/server/main.go` sind identische
-Wrapper — Vercels Root Directory muss auf die Repo-Wurzel zeigen,
-damit nicht die CLI unter `cmd/goteach` gebaut wird.
+Derselbe Analyse-Kern als HTTP-Dienst mit Web-Frontend. Die Logik liegt
+in `internal/server`; `main.go` (Repo-Wurzel) und `cmd/server/main.go`
+sind identische Wrapper.
 
 ```bash
 go build -o goteach-server .
 PORT=8080 ./goteach-server
 ```
 
-| Endpunkt        | Funktion                                              |
-|-----------------|-------------------------------------------------------|
-| `GET /`         | Dienstinfo (JSON)                                     |
-| `GET /healthz`  | Liveness-Check                                        |
-| `POST /analyze` | SGF im Body → Teaching-Reports als JSON               |
+| Endpunkt        | Funktion                                                    |
+|-----------------|-------------------------------------------------------------|
+| `GET /`         | Startseite: HTML für Browser (Accept: text/html), sonst Dienstinfo als JSON |
+| `GET /api`      | Dienstinfo (JSON)                                           |
+| `GET /healthz`  | Liveness-Check                                              |
+| `POST /analyze` | SGF → Teaching-Reports als JSON                             |
+| `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
+| `GET /app.js`, `GET /style.css`, `GET /favicon.svg` | eingebettete Assets     |
 
-Query-Parameter von `/analyze`: `visits` (Default 50, Deckel 1000),
-`tau`, `from`, `to`, `rules`, `komi`.
+`POST /analyze` akzeptiert das SGF auf drei Wegen:
+
+- **roher Body** (wie bisher): `curl --data-binary @partie.sgf …/analyze`
+- **Datei-Upload** (multipart, Feld `sgf`): `curl -F "sgf=@partie.sgf" …/analyze`
+- **Formularfeld** `sgf` (URL-kodiert) — so funktioniert das Formular der
+  Startseite auch ohne JavaScript
+
+Query-Parameter: `visits` (Default 50, Deckel 1000), `tau`, `from`, `to`,
+`rules`, `komi`; bei Formular-/Multipart-Posts auch als Formularfelder
+(Query gewinnt). `download=1` liefert den Report zusätzlich mit
+`Content-Disposition: attachment` als Datei-Download.
+
+Das Frontend ist serverseitig gerendert (SEO: Canonical, Open Graph,
+JSON-LD, robots.txt, sitemap.xml) und hydratisiert sich über
+`assets/app.js`: eingebetteter Zustand in `#goteach-state`, Drag & Drop,
+Ergebnis-Rendering, clientseitiger JSON-Download, Hell-/Dunkel-Umschalter
+(folgt sonst `prefers-color-scheme`). Ohne JavaScript bleibt das Formular
+als klassischer Multipart-POST nutzbar.
 
 Engine-Wahl über Umgebung: Sind `KATAGO_PATH` und `KATAGO_MODEL` gesetzt
 (optional `KATAGO_CONFIG`, Default `analysis.cfg`), startet pro Anfrage
 eine echte Engine. Andernfalls antwortet der Mock — die Antwort trägt
 dann `"synthetic": true` und die Werte sind **keine echte Analyse**.
+
+### Vercel-Deployment
+
+Vercels Go-Support baut den Server nur im **Standalone-Modus**, wenn das
+Framework-Preset `go` ist; andernfalls greift der alte
+Serverless-Function-Builder, baut das falsche Ziel und jede Anfrage endet
+mit `FUNCTION_INVOCATION_FAILED`. Die `vercel.json` im Repo pinnt deshalb
+`"framework": "go"` — das überstimmt die Projekteinstellung bei jedem
+Deployment. Erwartete Entrypoints sind `main.go`, `cmd/api/main.go` oder
+`cmd/server/main.go`; der Server lauscht auf dem `PORT` aus der Umgebung.
+Das Root Directory des Vercel-Projekts muss auf die Repo-Wurzel zeigen.
 
 ## LLM-Feinschliff (optional)
 
