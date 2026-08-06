@@ -45,7 +45,7 @@ RUN ./katago --appimage-extract >/dev/null \
  && ./squashfs-root/AppRun version
 
 RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/${KATAGO_NET}" \
- && echo "${KATAGO_NET_SHA256}  net.bin.gz" | sha256sum -c -
+ && printf '%s  %s\n' "${KATAGO_NET_SHA256}" "net.bin.gz" | sha256sum -c -
 
 # ---- Stufe 3: Laufzeit-Image ----------------------------------------------
 FROM ubuntu:22.04
