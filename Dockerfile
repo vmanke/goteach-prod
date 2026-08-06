@@ -18,6 +18,7 @@ ARG KATAGO_FLAVOR=eigenavx2
 # Transformer-Netz aus demselben Release: klein (36 MB), aber stärker
 # pro Visit als die stärksten b18-Netze des Hauptlaufs.
 ARG KATAGO_NET=b10c384h6nbttflrs.bin.gz
+ARG KATAGO_NET_SHA256=0ba27eced5180b3e3d0b898b280c541112989765e789d1eb6cd0d31b2b2c1229
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl unzip \
@@ -35,7 +36,8 @@ RUN curl -fSL -o katago.zip "https://github.com/lightvector/KataGo/releases/down
 RUN ./katago --appimage-extract >/dev/null \
  && ./squashfs-root/AppRun version
 
-RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/${KATAGO_NET}"
+RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/${KATAGO_NET}" \
+ && printf '%s  %s\n' "${KATAGO_NET_SHA256}" "net.bin.gz" | sha256sum -c -
 
 # ---- Stufe 3: Laufzeit-Image ----------------------------------------------
 FROM ubuntu:22.04
