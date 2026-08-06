@@ -1,0 +1,203 @@
+/* goteach-Frontend: schlicht, lesbar. Dunkelmodus folgt prefers-color-scheme;
+   ein explizites data-theme (Umschalter, localStorage) hat Vorrang. */
+:root {
+  --bg: #faf7f2;
+  --fg: #22201c;
+  --muted: #6b645a;
+  --card: #ffffff;
+  --border: #e2dcd2;
+  --accent: #8a5a2b;
+  --accent-fg: #ffffff;
+  --warn-bg: #fff4e0;
+  --warn-border: #e0b866;
+  --error: #b3362b;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1c1a17;
+  --fg: #ece7df;
+  --muted: #a39a8c;
+  --card: #262320;
+  --border: #3a352f;
+  --accent: #c98f4e;
+  --accent-fg: #1c1a17;
+  --warn-bg: #33290f;
+  --warn-border: #8a6d2f;
+  --error: #e07a6d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1a17;
+    --fg: #ece7df;
+    --muted: #a39a8c;
+    --card: #262320;
+    --border: #3a352f;
+    --accent: #c98f4e;
+    --accent-fg: #1c1a17;
+    --warn-bg: #33290f;
+    --warn-border: #8a6d2f;
+    --error: #e07a6d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+  max-width: 46rem;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.site-header { padding: 2.5rem 0 1rem; position: relative; }
+.site-header h1 { margin: 0; font-size: 2rem; letter-spacing: 0.02em; }
+
+.theme-toggle {
+  position: absolute;
+  top: 2.5rem;
+  right: 0;
+  padding: 0.35rem 0.7rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+.tagline { margin: 0.4rem 0 0; color: var(--muted); }
+
+.stone {
+  display: inline-block;
+  width: 0.9em; height: 0.9em;
+  border-radius: 50%;
+  vertical-align: baseline;
+}
+.stone-black { background: radial-gradient(circle at 35% 30%, #555, #000); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.4rem;
+  margin: 1.2rem 0;
+}
+.card h2 { margin-top: 0; font-size: 1.2rem; }
+
+.banner {
+  border-radius: 10px;
+  padding: 0.8rem 1.1rem;
+  margin: 1.2rem 0;
+}
+.banner-warn { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 1.2rem;
+  text-align: center;
+  transition: border-color 0.15s ease;
+}
+.dropzone.dragging { border-color: var(--accent); }
+.drop-hint { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.9rem; }
+
+.file-label input[type="file"] { max-width: 100%; }
+
+.field { display: block; margin: 0.9rem 0 0; }
+.field > span { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.2rem; }
+
+textarea, input[type="text"], input[type="number"], select {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+textarea { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 0.85rem; }
+
+.options { margin-top: 1rem; }
+.options summary { cursor: pointer; color: var(--muted); }
+.options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0 1rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.55rem 1.3rem;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: wait; }
+button.secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.checkbox { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); }
+
+.status { min-height: 1.4em; margin: 0.8rem 0 0; }
+.status.error { color: var(--error); }
+
+.summary { color: var(--muted); }
+
+.report {
+  border-top: 1px solid var(--border);
+  padding: 0.9rem 0;
+}
+.report header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.8rem;
+}
+.report-text {
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+}
+.cat-excellent { background: #2e7d3218; color: #2e7d32; border-color: #2e7d3255; }
+.cat-good { background: #55801518; color: #6b8e23; border-color: #6b8e2355; }
+.cat-inaccuracy { background: #b8860b18; color: #b8860b; border-color: #b8860b55; }
+.cat-mistake { background: #d2691e18; color: #d2691e; border-color: #d2691e55; }
+.cat-blunder { background: #b3362b18; color: #b3362b; border-color: #b3362b55; }
+
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.35rem 0.6rem 0.35rem 0; border-bottom: 1px solid var(--border); }
+
+pre code { font-size: 0.8rem; }
+pre { overflow-x: auto; }
+
+.site-footer { color: var(--muted); font-size: 0.85rem; margin-top: 2rem; }
+a { color: var(--accent); }
+
+/* Hydration: vor dem JS-Start interaktive Elemente verbergen; danach
+   entfallen die reinen No-JS-Hilfen (z. B. Download-Checkbox). */
+[data-js="pending"] .js-only { display: none; }
+[data-js="hydrated"] .no-js-only { display: none; }
