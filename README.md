@@ -79,14 +79,17 @@ Schwarz: ausgezeichnet ×5 | Ø Punktverlust -9.82
 Weiß:    ausgezeichnet ×5 | Ø Punktverlust -10.26
 ```
 
-## HTTP-Dienst (`cmd/server`)
+## HTTP-Dienst (`internal/server`)
 
 Für Deployments (z. B. Vercel, das `main.go`, `cmd/api/main.go` oder
 `cmd/server/main.go` als Entrypoint erwartet) gibt es denselben
-Analyse-Kern als HTTP-Dienst:
+Analyse-Kern als HTTP-Dienst. Die Logik liegt in `internal/server`;
+`main.go` (Repo-Wurzel) und `cmd/server/main.go` sind identische
+Wrapper — Vercels Root Directory muss auf die Repo-Wurzel zeigen,
+damit nicht die CLI unter `cmd/goteach` gebaut wird.
 
 ```bash
-go build -o goteach-server ./cmd/server
+go build -o goteach-server .
 PORT=8080 ./goteach-server
 ```
 

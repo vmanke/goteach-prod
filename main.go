@@ -1,5 +1,5 @@
-// Alternativer Entrypoint für Builder, die cmd/server/main.go erwarten;
-// identisch zum main.go in der Repo-Wurzel.
+// Vercel-Entrypoint in der Repo-Wurzel: startet den HTTP-Dienst aus
+// internal/server. Die CLI bleibt unter cmd/goteach.
 package main
 
 import (
