@@ -79,6 +79,34 @@ Schwarz: ausgezeichnet ×5 | Ø Punktverlust -9.82
 Weiß:    ausgezeichnet ×5 | Ø Punktverlust -10.26
 ```
 
+## HTTP-Dienst (`internal/server`)
+
+Für Deployments (z. B. Vercel, das `main.go`, `cmd/api/main.go` oder
+`cmd/server/main.go` als Entrypoint erwartet) gibt es denselben
+Analyse-Kern als HTTP-Dienst. Die Logik liegt in `internal/server`;
+`main.go` (Repo-Wurzel) und `cmd/server/main.go` sind identische
+Wrapper — Vercels Root Directory muss auf die Repo-Wurzel zeigen,
+damit nicht die CLI unter `cmd/goteach` gebaut wird.
+
+```bash
+go build -o goteach-server .
+PORT=8080 ./goteach-server
+```
+
+| Endpunkt        | Funktion                                              |
+|-----------------|-------------------------------------------------------|
+| `GET /`         | Dienstinfo (JSON)                                     |
+| `GET /healthz`  | Liveness-Check                                        |
+| `POST /analyze` | SGF im Body → Teaching-Reports als JSON               |
+
+Query-Parameter von `/analyze`: `visits` (Default 50, Deckel 1000),
+`tau`, `from`, `to`, `rules`, `komi`.
+
+Engine-Wahl über Umgebung: Sind `KATAGO_PATH` und `KATAGO_MODEL` gesetzt
+(optional `KATAGO_CONFIG`, Default `analysis.cfg`), startet pro Anfrage
+eine echte Engine. Andernfalls antwortet der Mock — die Antwort trägt
+dann `"synthetic": true` und die Werte sind **keine echte Analyse**.
+
 ## LLM-Feinschliff (optional)
 
 ```bash
