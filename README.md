@@ -124,6 +124,40 @@ Engine-Wahl über Umgebung: Sind `KATAGO_PATH` und `KATAGO_MODEL` gesetzt
 eine echte Engine. Andernfalls antwortet der Mock — die Antwort trägt
 dann `"synthetic": true` und die Werte sind **keine echte Analyse**.
 
+### Docker: echte KataGo-Engine
+
+Vercel-Functions haben keine GPU und taugen nicht als Engine-Host — dort
+läuft der Mock. Für echte Analysen bündelt das `Dockerfile` alles in
+einen Container: Go-Server, KataGo (CPU/Eigen, AVX2) und ein starkes,
+kleines Transformer-Netz (`b10c384h6nbttflrs`, 36 MB) aus dem offiziellen
+KataGo-Release v1.17.1.
+
+```bash
+docker build -t goteach .
+docker run -p 8080:8080 goteach          # oder: docker compose up --build
+curl --data-binary @partie.sgf "http://localhost:8080/analyze?visits=50"
+```
+
+**Zugriff auf KataGo:** direkt nie — der Server startet KataGo pro
+`/analyze`-Anfrage als Kindprozess (Analysis Engine, JSON über
+stdin/stdout). Die Umgebungsvariablen sind im Image vorbelegt
+(`KATAGO_PATH=/app/katago/AppRun`, `KATAGO_MODEL=/app/net.bin.gz`,
+`KATAGO_CONFIG=/app/analysis.cfg`) und lassen sich per `-e`/Volume
+überschreiben, z. B. für ein anderes Netz. Nach außen bleibt alles die
+gewohnte HTTP-API; Antworten tragen dann `"synthetic": false`.
+
+Hinweise:
+
+- **CPU-Kosten:** Der Engine-Start pro Anfrage lädt das Netz (≈ 10–20 s
+  auf CPU); Analysen skalieren mit Visits × Stellungen. Mit `visits`,
+  `from`/`to` dosieren; `numAnalysisThreads`/`numSearchThreadsPerAnalysisThread`
+  in `analysis.cfg` an die vCPUs anpassen.
+- **CPU ohne AVX2:** mit `--build-arg KATAGO_FLAVOR=eigen` bauen. Die
+  Release-Binaries sind x64; auf ARM (z. B. Apple Silicon) KataGo selbst
+  kompilieren oder auf einem x64-Host deployen.
+- **Arbeitsteilung:** Vercel bleibt Frontend/Demo (Mock), der
+  Docker-Host (VPS, Fly.io, Railway …) liefert die echte Analyse.
+
 ### Vercel-Deployment
 
 Vercels Go-Support baut den Server nur im **Standalone-Modus**, wenn das
