@@ -19,6 +19,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -196,7 +197,7 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if data, err = fetchOGSSGF(id); err != nil {
+		if data, err = fetchOGSSGF(r.Context(), id); err != nil {
 			httpError(w, http.StatusBadGateway, "OGS: %v", err)
 
 			return
@@ -416,9 +417,11 @@ func parseOGSGameID(ref string) (string, error) {
 		ref)
 }
 
-// fetchOGSSGF lädt das SGF einer öffentlichen OGS-Partie.
-func fetchOGSSGF(id string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet,
+// fetchOGSSGF lädt das SGF einer öffentlichen OGS-Partie. Der Context des
+// eingehenden Requests bricht den Abruf mit ab, wenn der Client die
+// Verbindung beendet.
+func fetchOGSSGF(ctx context.Context, id string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		ogsBaseURL+"/api/v1/games/"+id+"/sgf", nil)
 
 	if err != nil {

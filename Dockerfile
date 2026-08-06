@@ -19,6 +19,13 @@ ARG KATAGO_FLAVOR=eigenavx2
 # pro Visit als die stärksten b18-Netze des Hauptlaufs.
 ARG KATAGO_NET=b10c384h6nbttflrs.bin.gz
 
+# Gepinnte SHA256-Summen der Release-Assets (Supply-Chain-Schutz); Quelle:
+# Asset-Digests auf github.com/lightvector/KataGo/releases/tag/v1.17.1.
+# Wer KATAGO_VERSION/KATAGO_FLAVOR/KATAGO_NET ändert, MUSS die passenden
+# Summen mitliefern.
+ARG KATAGO_SHA256=234bf7866bc26f37baaeed60dc358b821bafc8e73e9bc50cb2d2a1cf51502d44
+ARG KATAGO_NET_SHA256=0ba27eced5180b3e3d0b898b280c541112989765e789d1eb6cd0d31b2b2c1229
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/*
@@ -26,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /katago
 
 RUN curl -fSL -o katago.zip "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/katago-v${KATAGO_VERSION}-${KATAGO_FLAVOR}-linux-x64.zip" \
+ && echo "${KATAGO_SHA256}  katago.zip" | sha256sum -c - \
  && unzip -q katago.zip katago \
  && rm katago.zip
 
@@ -35,7 +43,8 @@ RUN curl -fSL -o katago.zip "https://github.com/lightvector/KataGo/releases/down
 RUN ./katago --appimage-extract >/dev/null \
  && ./squashfs-root/AppRun version
 
-RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/${KATAGO_NET}"
+RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/${KATAGO_NET}" \
+ && echo "${KATAGO_NET_SHA256}  net.bin.gz" | sha256sum -c -
 
 # ---- Stufe 3: Laufzeit-Image ----------------------------------------------
 FROM ubuntu:22.04
