@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /katago
 
 RUN curl -fSL -o katago.zip "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/katago-v${KATAGO_VERSION}-${KATAGO_FLAVOR}-linux-x64.zip" \
- && echo "${KATAGO_ZIP_SHA256}  katago.zip" | sha256sum -c - \
+ && printf '%s  %s\n' "${KATAGO_ZIP_SHA256}" "katago.zip" | sha256sum -c - \
  && unzip -q katago.zip katago \
  && rm katago.zip
 
