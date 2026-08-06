@@ -134,7 +134,9 @@ Vercel-Functions haben keine GPU und taugen nicht als Engine-Host — dort
 läuft der Mock. Für echte Analysen bündelt das `Dockerfile` alles in
 einen Container: Go-Server, KataGo (CPU/Eigen, AVX2) und ein starkes,
 kleines Transformer-Netz (`b10c384h6nbttflrs`, 36 MB) aus dem offiziellen
-KataGo-Release v1.17.1.
+KataGo-Release v1.17.1. Beide Downloads werden im Build gegen gepinnte
+SHA256-Summen verifiziert (bei anderen `KATAGO_*`-Build-Args die
+passenden Summen mitliefern).
 
 ```bash
 docker build -t goteach .
