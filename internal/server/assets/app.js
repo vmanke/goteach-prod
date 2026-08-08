@@ -58,6 +58,7 @@
 
   var fileInput = form.querySelector('input[type="file"][name="sgf"]');
   var textInput = form.querySelector('textarea[name="sgf"]');
+  var imageInput = form.querySelector('input[type="file"][name="image"]');
   var dropzone = document.getElementById('dropzone');
   var analyzeBtn = document.getElementById('analyze-btn');
   var downloadBtn = document.getElementById('download-btn');
@@ -154,7 +155,23 @@
       summary += ' — Achtung: SYNTHETISCHE Werte (Mock, keine echte Engine).';
     }
 
+    if (payload.position) {
+      // Ein Brettfoto zeigt eine Stellung, keine Partie: statt Zug-Reports
+      // gibt es einen Stellungsbericht.
+      summary = 'Erkannte Stellung, Brett ' + payload.size + '×' +
+        payload.size + ', Komi ' + payload.komi +
+        (payload.rules ? ', Regeln ' + payload.rules : '');
+
+      if (payload.synthetic) {
+        summary += ' — Achtung: SYNTHETISCHE Werte (Mock, keine echte Engine).';
+      }
+    }
+
     resultsSummary.textContent = summary;
+
+    if (payload.position) {
+      renderPosition(payload.position);
+    }
 
     (payload.reports || []).forEach(function (report) {
       var article = document.createElement('article');
@@ -186,9 +203,73 @@
     results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
+  // Stellungsbericht eines erkannten Bretts: Lehrtext plus Kettenliste.
+  function renderPosition(position) {
+    var article = document.createElement('article');
+    article.className = 'report';
+
+    var head = document.createElement('header');
+    var title = document.createElement('strong');
+    title.textContent = 'Stellung — ' + position.stones + ' Steine';
+    head.appendChild(title);
+    article.appendChild(head);
+
+    var text = document.createElement('pre');
+    text.className = 'report-text';
+    text.textContent = position.text || '';
+    article.appendChild(text);
+
+    (position.groups || []).forEach(function (group) {
+      var line = document.createElement('div');
+      var marks = (group.inAtari ? ' [Atari]' : '') +
+        (group.uncondAlive ? ' [unbedingt lebendig]' : '');
+
+      line.textContent = group.color + ' ' + group.rep + ': ' + group.stones +
+        ' Steine, ' + group.liberties + ' Freiheiten, Stärke ' +
+        group.strength.toFixed(2) + marks;
+      article.appendChild(line);
+    });
+
+    resultsList.appendChild(article);
+  }
+
+  // Brettfoto statt SGF: als Formulardaten senden, damit der Server das
+  // Bild am Feldnamen erkennt.
+  function submitImage(file) {
+    var body = new FormData();
+    body.append('image', file, file.name || 'brett.png');
+
+    busy(true);
+
+    return fetch('/analyze?' + queryFromOptions().toString(), {
+      method: 'POST',
+      body: body
+    }).then(function (res) {
+      return res.json().then(function (payload) {
+        if (!res.ok) {
+          throw new Error(payload.error || ('HTTP ' + res.status));
+        }
+
+        lastReport = payload;
+        render(payload);
+        setStatus('Stellung erkannt.', false);
+      });
+    });
+  }
+
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
     setStatus('', false);
+
+    if (imageInput && imageInput.files && imageInput.files.length > 0) {
+      submitImage(imageInput.files[0]).catch(function (err) {
+        setStatus('Fehler: ' + err.message, true);
+      }).then(function () {
+        busy(false);
+      });
+
+      return;
+    }
 
     readSGF().then(function (sgf) {
       var ogsField = form.elements.namedItem('ogs');

@@ -39,11 +39,16 @@ import (
 	"github.com/vmanke/goteach-prod/internal/dotenv"
 	"github.com/vmanke/goteach-prod/katago"
 	"github.com/vmanke/goteach-prod/teaching"
+	"github.com/vmanke/goteach-prod/vision"
 )
 
 // maxSGFBytes begrenzt den Request-Body; reale SGF-Partien liegen weit
 // unter 1 MiB.
 const maxSGFBytes = 1 << 20
+
+// maxImageBytes begrenzt einen Bild-Upload. Fotos eines Bretts liegen
+// deutlich darunter; das Limit hält den Speicherbedarf pro Anfrage im Zaum.
+const maxImageBytes = 8 << 20
 
 // maxVisits deckelt den teuersten Parameter (Visits × Stellungen).
 const maxVisits = 1000
@@ -157,7 +162,12 @@ type analyzeResponse struct {
 	Rules     string                `json:"rules,omitempty"`
 	Moves     int                   `json:"moves"`
 	Synthetic bool                  `json:"synthetic"`
-	Reports   []teaching.MoveReport `json:"reports"`
+	Reports   []teaching.MoveReport `json:"reports,omitempty"`
+
+	// Position steht statt Reports, wenn die Anfrage ein Brettfoto war:
+	// Eine erkannte Stellung hat keine Zughistorie und damit keine
+	// Lehreinheit pro Zug.
+	Position *teaching.PositionReport `json:"position,omitempty"`
 }
 
 func handleAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -168,10 +178,16 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, get, status, err := sgfFromRequest(w, r)
+	data, image, get, status, err := inputFromRequest(w, r)
 
 	if err != nil {
 		httpError(w, status, "%v", err)
+
+		return
+	}
+
+	if len(image) > 0 {
+		analyzeImage(w, r, image, get)
 
 		return
 	}
@@ -227,29 +243,12 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var an katago.Analyzer
+	an, synthetic, err := startAnalyzer()
 
-	synthetic := !katagoConfigured()
+	if err != nil {
+		httpError(w, http.StatusBadGateway, "KataGo-Start: %v", err)
 
-	if synthetic {
-		an = katago.Mock{}
-	} else {
-		configPath := os.Getenv("KATAGO_CONFIG")
-
-		if configPath == "" {
-			configPath = "analysis.cfg"
-		}
-
-		eng, err := katago.Start(
-			os.Getenv("KATAGO_PATH"), os.Getenv("KATAGO_MODEL"), configPath)
-
-		if err != nil {
-			httpError(w, http.StatusBadGateway, "KataGo-Start: %v", err)
-
-			return
-		}
-
-		an = eng
+		return
 	}
 
 	defer func() {
@@ -295,12 +294,125 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// sgfFromRequest extrahiert das SGF aus dem Request: Datei-Upload oder
-// Textfeld "sgf" (multipart/URL-kodiert) sowie roher Body wie bisher.
+// startAnalyzer liefert die Engine dieser Instanz. Ohne konfigurierte
+// KataGo-Binary läuft der Mock; die Antwort trägt dann "synthetic": true.
+func startAnalyzer() (katago.Analyzer, bool, error) {
+	if !katagoConfigured() {
+		return katago.Mock{}, true, nil
+	}
+
+	configPath := os.Getenv("KATAGO_CONFIG")
+
+	if configPath == "" {
+		configPath = "analysis.cfg"
+	}
+
+	eng, err := katago.Start(
+		os.Getenv("KATAGO_PATH"), os.Getenv("KATAGO_MODEL"), configPath)
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	return eng, false, nil
+}
+
+// analyzeImage beantwortet eine Anfrage mit Brettfoto: erst die Erkennung
+// über die Vision-Brücke (Stufen 1–2), dann der Stellungsbericht.
+//
+// Kein Teaching pro Zug: Ein Foto zeigt eine Stellung, keine Partie.
+func analyzeImage(w http.ResponseWriter, r *http.Request, image []byte,
+	get func(string) string) {
+
+	if !vision.Configured() {
+		httpError(w, http.StatusNotImplemented,
+			"Bilderkennung ist auf dieser Instanz nicht eingerichtet "+
+				"(%s nicht gesetzt)", vision.EnvCommand)
+
+		return
+	}
+
+	opt, err := optionsFrom(get)
+
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "%v", err)
+
+		return
+	}
+
+	detect := vision.Options{Komi: opt.Komi}
+
+	if raw := strings.TrimSpace(get("size")); raw != "" {
+		size, err := strconv.Atoi(raw)
+
+		if err != nil || (size != 9 && size != 13 && size != 19) {
+			httpError(w, http.StatusBadRequest, "size muss 9, 13 oder 19 sein")
+
+			return
+		}
+
+		detect.Size = size
+	}
+
+	pos, err := vision.Detect(r.Context(), image, detect)
+
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "Bilderkennung: %v", err)
+
+		return
+	}
+
+	game, err := pos.Game()
+
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "Bilderkennung: %v", err)
+
+		return
+	}
+
+	an, synthetic, err := startAnalyzer()
+
+	if err != nil {
+		httpError(w, http.StatusBadGateway, "KataGo-Start: %v", err)
+
+		return
+	}
+
+	defer func() {
+		if err := an.Close(); err != nil {
+			log.Printf("goteach-server: Analyzer schließen: %v", err)
+		}
+	}()
+
+	report, err := teaching.AnalyzePosition(game, an, opt)
+
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "Analyse: %v", err)
+
+		return
+	}
+
+	if wantsDownload(get) {
+		w.Header().Set("Content-Disposition",
+			`attachment; filename="goteach-stellung.json"`)
+	}
+
+	writeJSON(w, http.StatusOK, analyzeResponse{
+		Size:      report.Size,
+		Komi:      report.Komi,
+		Rules:     report.Rules,
+		Synthetic: synthetic,
+		Position:  report,
+	})
+}
+
+// inputFromRequest extrahiert die Eingabe aus dem Request: SGF als
+// Datei-Upload, Textfeld "sgf" (multipart/URL-kodiert) oder roher Body — und
+// zusätzlich ein PNG aus dem Datei-Feld "image".
 // Der zurückgegebene Getter liest Parameter aus Query und Formular
 // (Query gewinnt); der Statuscode gilt nur im Fehlerfall.
-func sgfFromRequest(w http.ResponseWriter, r *http.Request) (
-	[]byte, func(string) string, int, error) {
+func inputFromRequest(w http.ResponseWriter, r *http.Request) (
+	[]byte, []byte, func(string) string, int, error) {
 	queryOnly := func(key string) string { return r.URL.Query().Get(key) }
 
 	mediaType := r.Header.Get("Content-Type")
@@ -311,36 +423,34 @@ func sgfFromRequest(w http.ResponseWriter, r *http.Request) (
 
 	switch mediaType {
 	case "multipart/form-data":
-		// Etwas Luft für Boundaries und Optionsfelder oberhalb des SGF-Limits.
-		r.Body = http.MaxBytesReader(w, r.Body, maxSGFBytes+(1<<16))
+		// Das Limit richtet sich nach dem Bild-Upload, denn nur der kann
+		// groß werden; das engere SGF-Limit prüft der Aufrufer danach.
+		limit := int64(maxImageBytes + (1 << 16))
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 
-		if err := r.ParseMultipartForm(maxSGFBytes + (1 << 16)); err != nil {
-			return nil, queryOnly, bodyErrStatus(err),
+		if err := r.ParseMultipartForm(limit); err != nil {
+			return nil, nil, queryOnly, bodyErrStatus(err),
 				fmt.Errorf("Formular unlesbar: %w", err)
 		}
 
 		get := valuesGetter(r, r.PostForm)
-		file, header, err := r.FormFile("sgf")
 
-		if err == nil {
-			defer file.Close()
+		if image, err := uploaded(r, "image", maxImageBytes); err != nil {
+			return nil, nil, get, http.StatusBadRequest, err
+		} else if len(image) > 0 {
+			return nil, image, get, 0, nil
+		}
 
-			if header.Filename != "" && header.Size > 0 {
-				data, err := io.ReadAll(io.LimitReader(file, maxSGFBytes+1))
-
-				if err != nil {
-					return nil, get, http.StatusBadRequest,
-						fmt.Errorf("Upload unlesbar: %w", err)
-				}
-
-				return data, get, 0, nil
-			}
+		if sgf, err := uploaded(r, "sgf", maxSGFBytes); err != nil {
+			return nil, nil, get, http.StatusBadRequest, err
+		} else if len(sgf) > 0 {
+			return sgf, nil, get, 0, nil
 		}
 
 		// Kein (nutzbarer) Datei-Upload: Textfeld "sgf". Leere Werte
 		// überspringen — ein leeres File-Input landet als Leerstring
 		// vor dem Textfeld gleichen Namens.
-		return []byte(firstNonEmpty(r.PostForm["sgf"])), get, 0, nil
+		return []byte(firstNonEmpty(r.PostForm["sgf"])), nil, get, 0, nil
 
 	case "application/x-www-form-urlencoded":
 		// Achtung: curl setzt diesen Typ als Default (-d/--data-binary).
@@ -353,38 +463,83 @@ func sgfFromRequest(w http.ResponseWriter, r *http.Request) (
 		raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 
 		if err != nil {
-			return nil, queryOnly, http.StatusBadRequest,
+			return nil, nil, queryOnly, http.StatusBadRequest,
 				fmt.Errorf("Body unlesbar: %w", err)
 		}
 
 		if len(raw) > limit {
-			return nil, queryOnly, http.StatusRequestEntityTooLarge,
+			return nil, nil, queryOnly, http.StatusRequestEntityTooLarge,
 				fmt.Errorf("Body größer als %d Bytes", limit)
 		}
 
 		if trimmed := bytes.TrimSpace(raw); bytes.HasPrefix(trimmed, []byte("(")) {
-			return trimmed, queryOnly, 0, nil
+			return trimmed, nil, queryOnly, 0, nil
 		}
 
 		values, err := url.ParseQuery(string(raw))
 
 		if err != nil {
-			return nil, queryOnly, http.StatusBadRequest,
+			return nil, nil, queryOnly, http.StatusBadRequest,
 				fmt.Errorf("Formular unlesbar: %w", err)
 		}
 
-		return []byte(firstNonEmpty(values["sgf"])), valuesGetter(r, values), 0, nil
+		return []byte(firstNonEmpty(values["sgf"])), nil,
+			valuesGetter(r, values), 0, nil
+
+	case "image/png":
+		// Rohes PNG im Body: der kürzeste Weg für API-Nutzer.
+		image, err := io.ReadAll(io.LimitReader(r.Body, maxImageBytes+1))
+
+		if err != nil {
+			return nil, nil, queryOnly, http.StatusBadRequest,
+				fmt.Errorf("Body unlesbar: %w", err)
+		}
+
+		if len(image) > maxImageBytes {
+			return nil, nil, queryOnly, http.StatusRequestEntityTooLarge,
+				fmt.Errorf("Bild größer als %d Bytes", maxImageBytes)
+		}
+
+		return nil, image, queryOnly, 0, nil
 	}
 
 	// Roher Body (bisheriges API-Verhalten).
 	data, err := io.ReadAll(io.LimitReader(r.Body, maxSGFBytes+1))
 
 	if err != nil {
-		return nil, queryOnly, http.StatusBadRequest,
+		return nil, nil, queryOnly, http.StatusBadRequest,
 			fmt.Errorf("Body unlesbar: %w", err)
 	}
 
-	return data, queryOnly, 0, nil
+	return data, nil, queryOnly, 0, nil
+}
+
+// uploaded liest ein Datei-Feld des Formulars; fehlt es oder ist es leer,
+// kommt nil zurück (ein leeres File-Input ist der Normalfall, kein Fehler).
+func uploaded(r *http.Request, field string, limit int) ([]byte, error) {
+	file, header, err := r.FormFile(field)
+
+	if err != nil {
+		return nil, nil
+	}
+
+	defer file.Close()
+
+	if header.Filename == "" || header.Size == 0 {
+		return nil, nil
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
+
+	if err != nil {
+		return nil, fmt.Errorf("Upload %q unlesbar: %w", field, err)
+	}
+
+	if len(data) > limit {
+		return nil, fmt.Errorf("Upload %q größer als %d Bytes", field, limit)
+	}
+
+	return data, nil
 }
 
 // ogsBaseURL ist Variable statt Konstante, damit Tests einen Stub-Server

@@ -50,6 +50,10 @@ RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/down
 # ---- Stufe 3: Laufzeit-Image ----------------------------------------------
 FROM ubuntu:22.04
 
+# Bilderkennung (Stufen 1-2) ist optional: Sie zieht Python, OpenCV und die
+# ONNX Runtime nach und verdoppelt das Image. Standardmäßig aus.
+ARG WITH_VISION=0
+
 # curl nur für den Docker-Healthcheck.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl \
@@ -62,6 +66,16 @@ COPY --from=gobuild /out/goteach-server /app/goteach-server
 COPY --from=katago /katago/squashfs-root /app/katago
 COPY --from=katago /katago/net.bin.gz /app/net.bin.gz
 COPY analysis.cfg /app/analysis.cfg
+COPY vision/python /app/vision-python
+
+# Nur bei WITH_VISION=1 installieren; sonst bleibt das Verzeichnis liegen und
+# kostet nichts.
+RUN if [ "$WITH_VISION" = "1" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip libgl1 libglib2.0-0 \
+   && pip3 install --no-cache-dir "/app/vision-python[onnx]" \
+   && rm -rf /var/lib/apt/lists/* ; \
+    fi
 
 # analysis.cfg schreibt Engine-Logs nach ./analysis_logs (relativ zum CWD).
 RUN mkdir -p /app/analysis_logs && chown -R goteach:goteach /app
@@ -70,6 +84,10 @@ ENV KATAGO_PATH=/app/katago/AppRun \
     KATAGO_MODEL=/app/net.bin.gz \
     KATAGO_CONFIG=/app/analysis.cfg \
     PORT=8080
+
+# Ohne GOTEACH_VISION_CMD meldet der Dienst die Bilderkennung als nicht
+# eingerichtet (HTTP 501) — genau richtig für Images ohne WITH_VISION=1.
+ENV GOTEACH_VISION_CMD=""
 
 USER goteach
 EXPOSE 8080
