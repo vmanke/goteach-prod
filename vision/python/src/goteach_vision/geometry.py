@@ -144,7 +144,19 @@ def _downscale(rgb: np.ndarray) -> tuple[np.ndarray, float]:
 
     scale = WORK_MAX / longest
 
-    return cv2.resize(rgb, (int(w * scale), int(h * scale)), cv2.INTER_AREA), scale
+    # interpolation ausdruecklich benennen: Das dritte Positionsargument von
+    # cv2.resize ist dst, nicht interpolation. Positionell uebergeben wurde
+    # INTER_AREA stillschweigend verworfen und es lief INTER_LINEAR — beim
+    # Verkleinern genau die falsche Wahl, weil dabei duenne Gitterlinien
+    # wegaliasen statt gemittelt zu werden.
+    return (
+        cv2.resize(
+            rgb,
+            (int(w * scale), int(h * scale)),
+            interpolation=cv2.INTER_AREA,
+        ),
+        scale,
+    )
 
 
 def _line_response(rgb: np.ndarray) -> np.ndarray:

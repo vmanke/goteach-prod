@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vmanke/goteach-prod/internal/capped"
 )
 
 // EnvCommand benennt das Erkennungskommando. Ist es nicht gesetzt, ist die
@@ -29,6 +31,10 @@ const DefaultTimeout = 60 * time.Second
 // maxOutput begrenzt, was vom Kindprozess entgegengenommen wird. Der Vertrag
 // ist eine Handvoll Kilobyte; alles darüber ist ein Fehlerfall.
 const maxOutput = 1 << 20
+
+// maxStderr begrenzt die Diagnoseausgabe. Gebraucht wird davon nur die
+// letzte Zeile.
+const maxStderr = 1 << 16
 
 // ErrNotConfigured meldet, dass auf dieser Instanz kein Erkenner eingerichtet
 // ist. Aufrufer sollen das von einem Erkennungsfehler unterscheiden können:
@@ -100,28 +106,35 @@ func Detect(ctx context.Context, png []byte, opt Options) (*Position, error) {
 	cmd := exec.CommandContext(ctx, fields[0], args...)
 	cmd.Stdin = bytes.NewReader(png)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Gedeckelt schon beim Schreiben, nicht erst danach: Ein Kommando, das
+	// unerwartet viel ausgibt, würde sonst erst den Speicher füllen und dann
+	// abgewiesen werden.
+	stdout := capped.New(maxOutput, cancel)
+	stderr := capped.New(maxStderr, nil)
 
-	if err := cmd.Run(); err != nil {
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+
+	if err := stdout.Err("vision: Ausgabe"); err != nil {
+		return nil, err
+	}
+
+	if runErr != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("vision: Erkennung abgebrochen nach %s: %w",
 				timeout, ctx.Err())
 		}
 
 		return nil, fmt.Errorf("vision: %s fehlgeschlagen: %w%s",
-			fields[0], err, diagnostics(&stderr))
-	}
-
-	if stdout.Len() > maxOutput {
-		return nil, fmt.Errorf("vision: Ausgabe größer als %d Bytes", maxOutput)
+			fields[0], runErr, diagnostics(stderr))
 	}
 
 	pos, err := FromJSON(bytes.TrimSpace(stdout.Bytes()))
 
 	if err != nil {
-		return nil, fmt.Errorf("%w%s", err, diagnostics(&stderr))
+		return nil, fmt.Errorf("%w%s", err, diagnostics(stderr))
 	}
 
 	return pos, nil
@@ -145,7 +158,7 @@ func flags(opt Options) []string {
 // diagnostics hängt die letzte stderr-Zeile des Erkenners an eine Fehlermeldung.
 // Ohne sie stünde nur "exit status 1" da — die eigentliche Ursache meldet der
 // Erkenner aber genau dort.
-func diagnostics(stderr *bytes.Buffer) string {
+func diagnostics(stderr *capped.Buffer) string {
 	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
 
 	for i := len(lines) - 1; i >= 0; i-- {

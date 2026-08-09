@@ -57,7 +57,6 @@ def test_netz_erhaelt_die_aufloesung():
 
 def test_export_stimmt_mit_torch_ueberein(tmp_path):
     pytest.importorskip("onnxruntime")
-    pytest.importorskip("onnxscript")
 
     from goteach_vision.export import export
     from goteach_vision.unet import UNet

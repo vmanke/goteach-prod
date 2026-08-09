@@ -526,7 +526,15 @@ func uploaded(r *http.Request, field string, limit int) ([]byte, error) {
 	file, header, err := r.FormFile(field)
 
 	if err != nil {
-		return nil, nil
+		// Nur ein fehlendes Feld ist der Normalfall. Jeden anderen Fehler —
+		// etwa kaputte Multipart-Daten — als "kein Upload" zu behandeln,
+		// verschluckt die Ursache und lässt sie später an einer Stelle
+		// auftauchen, die nichts mehr damit zu tun hat.
+		if errors.Is(err, http.ErrMissingFile) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("Upload %q unlesbar: %w", field, err)
 	}
 
 	defer file.Close()

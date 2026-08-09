@@ -104,7 +104,6 @@ def test_mehr_durchlaeufe_aendern_das_ergebnis():
 
 def test_export_ist_deterministisch_und_stimmt_mit_torch(tmp_path):
     pytest.importorskip("onnxruntime")
-    pytest.importorskip("onnxscript")
 
     from goteach_salience.export import export
 
@@ -141,7 +140,6 @@ def test_vorhersage_folgt_der_beobachtung_nach_dem_training():
 
 def test_onnx_pfad_liefert_dieselben_fenster_wie_torch(tmp_path):
     pytest.importorskip("onnxruntime")
-    pytest.importorskip("onnxscript")
 
     from goteach_salience.export import export
     from goteach_salience.infer import predicted_salience

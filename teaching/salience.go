@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/internal/capped"
 )
 
 // EnvSalienceCommand benennt das Kommando des gelernten Salienzmoduls. Ist es
@@ -28,6 +29,9 @@ const salienceTimeout = 120 * time.Second
 
 // maxSalienceOutput begrenzt, was vom Kindprozess entgegengenommen wird.
 const maxSalienceOutput = 8 << 20
+
+// maxSalienceStderr begrenzt die Diagnoseausgabe.
+const maxSalienceStderr = 1 << 16
 
 // ErrSalienceNotConfigured meldet, dass kein Salienzmodul eingerichtet ist.
 var ErrSalienceNotConfigured = errors.New(
@@ -111,22 +115,26 @@ func requestSalience(ctx context.Context, size int, positions []*board.Board,
 	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
 	cmd.Stdin = bytes.NewReader(body)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Gedeckelt schon beim Schreiben, nicht erst danach.
+	stdout := capped.New(maxSalienceOutput, cancel)
+	stderr := capped.New(maxSalienceStderr, nil)
 
-	if err := cmd.Run(); err != nil {
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+
+	if err := stdout.Err("teaching: Salienz-Ausgabe"); err != nil {
+		return nil, err
+	}
+
+	if runErr != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("teaching: Salienz abgebrochen: %w", ctx.Err())
 		}
 
 		return nil, fmt.Errorf("teaching: %s fehlgeschlagen: %w%s",
-			fields[0], err, lastLine(&stderr))
-	}
-
-	if stdout.Len() > maxSalienceOutput {
-		return nil, fmt.Errorf("teaching: Salienz-Ausgabe größer als %d Bytes",
-			maxSalienceOutput)
+			fields[0], runErr, lastLine(stderr))
 	}
 
 	var result struct {
@@ -135,7 +143,7 @@ func requestSalience(ctx context.Context, size int, positions []*board.Board,
 
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
 		return nil, fmt.Errorf("teaching: Salienz-Ausgabe unlesbar: %w%s",
-			err, lastLine(&stderr))
+			err, lastLine(stderr))
 	}
 
 	return result.Windows, nil
@@ -167,7 +175,7 @@ func boardRows(b *board.Board) []string {
 
 // lastLine hängt die letzte stderr-Zeile an eine Fehlermeldung; ohne sie
 // stünde dort nur "exit status 1".
-func lastLine(stderr *bytes.Buffer) string {
+func lastLine(stderr *capped.Buffer) string {
 	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
 
 	for i := len(lines) - 1; i >= 0; i-- {

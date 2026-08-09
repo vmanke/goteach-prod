@@ -25,6 +25,19 @@ INPUT_NAME = "input"
 OUTPUT_NAME = "logits"
 
 
+def device_of(model: torch.nn.Module) -> torch.device:
+    """Das Geraet, auf dem die Gewichte liegen.
+
+    Der Beispieltensor muss dort entstehen, wo das Modell liegt. Wird direkt
+    nach dem Training auf der GPU exportiert, scheitert ein CPU-Tensor am
+    Device-Mismatch — und zwar erst beim Export, also nach der teuren Arbeit.
+    """
+    for parameter in model.parameters():
+        return parameter.device
+
+    return torch.device("cpu")
+
+
 def export(
     model: UNet,
     path: str,
@@ -34,7 +47,7 @@ def export(
 ) -> str:
     """Schreibt das Netz als ONNX-Graph und prueft es gegen torch."""
     model.eval()
-    example = torch.zeros(1, INPUT_CHANNELS, side, side)
+    example = torch.zeros(1, INPUT_CHANNELS, side, side, device=device_of(model))
 
     torch.onnx.export(
         model,
@@ -58,14 +71,19 @@ def export(
 def _verify(model: UNet, path: str, side: int, tolerance: float) -> None:
     import onnxruntime
 
+    # Der Startwert bleibt auf der CPU, damit die Probe unabhaengig vom
+    # Geraet dieselbe ist; erst danach wandert sie zum Modell.
     generator = torch.Generator().manual_seed(7)
     probe = torch.randn(1, INPUT_CHANNELS, side, side, generator=generator)
+    on_device = probe.to(device_of(model))
 
     with torch.no_grad():
-        expected = model(probe).numpy()
+        # detach und cpu ausdruecklich: Ohne sie scheitert .numpy() an einem
+        # Tensor, der noch Gradienten fuehrt oder auf der GPU liegt.
+        expected = model(on_device).detach().cpu().numpy()
 
     session = onnxruntime.InferenceSession(path, providers=["CPUExecutionProvider"])
-    actual = session.run(None, {INPUT_NAME: probe.numpy()})[0]
+    actual = session.run(None, {INPUT_NAME: probe.cpu().numpy()})[0]
 
     deviation = float(np.abs(expected - actual).max())
 

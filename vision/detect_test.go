@@ -54,6 +54,18 @@ func fakeDetector(mode string) int {
 		time.Sleep(10 * time.Second)
 
 		return 0
+
+	case "flood":
+		// Deutlich mehr als maxOutput, damit die Deckelung greifen muss.
+		chunk := strings.Repeat("x", 64<<10)
+
+		for written := 0; written < 4*maxOutput; written += len(chunk) {
+			if _, err := os.Stdout.WriteString(chunk); err != nil {
+				return 0
+			}
+		}
+
+		return 0
 	}
 
 	return 0
@@ -163,6 +175,25 @@ func TestDetectOhneKonfigurationMeldetKlar(t *testing.T) {
 
 	if !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("ErrNotConfigured erwartet, erhalten: %v", err)
+	}
+}
+
+func TestDetectDeckeltDieAusgabe(t *testing.T) {
+	// Ein Kommando, das unerwartet viel schreibt, darf den Speicher nicht
+	// füllen: Die Grenze greift beim Schreiben und bricht den Lauf ab.
+	started := time.Now()
+	_, err := Detect(context.Background(), []byte("PNG"), fakeOptions(t, "flood"))
+
+	if err == nil {
+		t.Fatal("Fehler bei übergroßer Ausgabe erwartet")
+	}
+
+	if !strings.Contains(err.Error(), "größer als") {
+		t.Fatalf("unerwartete Meldung: %v", err)
+	}
+
+	if elapsed := time.Since(started); elapsed > 30*time.Second {
+		t.Fatalf("Abbruch dauerte %s — die Deckelung greift zu spät", elapsed)
 	}
 }
 

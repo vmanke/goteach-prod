@@ -21,7 +21,9 @@ dependencies = [
 # Inferenz mit dem U-Net; bewusst getrennt, damit die Basis leicht bleibt.
 onnx = ["onnxruntime>=1.16,<2"]
 # Training und ONNX-Export brauchen torch; zur Laufzeit nie noetig.
-train = ["torch>=2.1", "onnx>=1.15"]
+# onnxscript gehoert dazu: Der Exporter von torch >= 2.6 laeuft ueber dynamo
+# und bricht ohne dieses Paket ab.
+train = ["torch>=2.1", "onnx>=1.15", "onnxscript>=0.1"]
 dev = ["pytest>=7.4"]
 
 [project.scripts]
