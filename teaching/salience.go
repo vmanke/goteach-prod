@@ -64,9 +64,9 @@ type salienceTurn struct {
 
 // requestSalience schickt den Partieverlauf durch das Modul.
 //
-// Wie bei der Bilderkennung ein Subprozess und kein Netzdienst: Die Go-Seite
-// bleibt ohne externe Abhängigkeiten, und das Modul bleibt austauschbar — es
-// muss allein diesen JSON-Vertrag einhalten.
+// Ein Subprozess und kein Netzdienst: Die Go-Seite bleibt ohne externe
+// Abhängigkeiten, und das Modul bleibt austauschbar — es muss allein diesen
+// JSON-Vertrag einhalten.
 func requestSalience(ctx context.Context, size int, positions []*board.Board,
 	ownership [][]float64, lo int, command string) ([]SalienceWindow, error) {
 
@@ -149,7 +149,8 @@ func requestSalience(ctx context.Context, size int, positions []*board.Board,
 	return result.Windows, nil
 }
 
-// boardRows schreibt ein Brett im Zeilenformat des Vision-Vertrags.
+// boardRows schreibt ein Brett im Zeilenformat des Salienz-Vertrags:
+// Zeile 0 oben, '.' leer, 'X' schwarz, 'O' weiß.
 func boardRows(b *board.Board) []string {
 	rows := make([]string, b.Size)
 

@@ -120,7 +120,7 @@ func TestSalienzmodulUnbrauchbareAusgabe(t *testing.T) {
 	}
 }
 
-func TestBrettzeilenFolgenDemVisionVertrag(t *testing.T) {
+func TestBrettzeilenFolgenDemVertrag(t *testing.T) {
 	b := board.New(3)
 
 	if err := b.SetStone(board.Point{X: 0, Y: 0}, board.Black); err != nil {
@@ -133,8 +133,7 @@ func TestBrettzeilenFolgenDemVisionVertrag(t *testing.T) {
 
 	rows := boardRows(b)
 
-	// Zeile 0 ist oben, '.' leer, 'X' schwarz, 'O' weiß — identisch zum
-	// Austauschformat der Bilderkennung.
+	// Zeile 0 ist oben, '.' leer, 'X' schwarz, 'O' weiß.
 	if rows[0] != "X.." || rows[2] != "..O" {
 		t.Fatalf("Zeilen %v", rows)
 	}

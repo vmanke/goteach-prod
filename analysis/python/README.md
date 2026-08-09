@@ -42,7 +42,7 @@ goteach -sgf partie.sgf -mock
 ## Verträge
 
 Eingabe je Stellung die Brettzeilen (`.` leer, `X` schwarz, `O` weiß, Zeile 0
-oben — identisch zum Vertrag der Bilderkennung) und das Ownership-Feld:
+oben) und das Ownership-Feld:
 
 ```json
 {"size": 19, "turns": [{"rows": ["...", "..."], "ownership": [0.1, -0.4]}]}

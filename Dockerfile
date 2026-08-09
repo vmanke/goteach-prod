@@ -3,10 +3,6 @@
 # pro /analyze-Anfrage als Kindprozess (Analysis Engine, JSON über
 # stdin/stdout) — gesteuert über KATAGO_PATH/KATAGO_MODEL/KATAGO_CONFIG.
 
-# Bilderkennung (Stufen 1-2) ist optional: Sie zieht Python, OpenCV und die
-# ONNX Runtime nach und verdoppelt das Image. Standardmäßig aus.
-ARG WITH_VISION=0
-
 # ---- Stufe 1: Go-Server bauen ---------------------------------------------
 FROM golang:1.22 AS gobuild
 WORKDIR /src
@@ -51,24 +47,8 @@ RUN ./katago --appimage-extract >/dev/null \
 RUN curl -fSL -o net.bin.gz "https://github.com/lightvector/KataGo/releases/download/v${KATAGO_VERSION}/${KATAGO_NET}" \
  && printf '%s  %s\n' "${KATAGO_NET_SHA256}" "net.bin.gz" | sha256sum -c -
 
-# ---- Stufe 3: Vision-Quellen, nur wenn sie gebraucht werden ----------------
-# Zwei Varianten, ausgewählt über den Build-Arg. Ein einfaches COPY mit
-# nachgelagertem if wäre nicht dasselbe: Die Dateien lägen dann in jedem Fall
-# in einer Image-Schicht und blieben Teil des Images, auch wenn ein späterer
-# Schritt sie löscht.
-FROM ubuntu:22.04 AS vision-src-0
-RUN mkdir -p /vision-python
-
-FROM ubuntu:22.04 AS vision-src-1
-COPY vision/python /vision-python
-
-# Interpoliert das globale ARG von ganz oben — nur dort deklarierte Argumente
-# sind in FROM-Zeilen sichtbar.
-FROM vision-src-${WITH_VISION} AS vision-src
-
-# ---- Stufe 4: Laufzeit-Image ----------------------------------------------
+# ---- Stufe 3: Laufzeit-Image ----------------------------------------------
 FROM ubuntu:22.04
-ARG WITH_VISION
 
 # curl nur für den Docker-Healthcheck.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -83,17 +63,6 @@ COPY --from=katago /katago/squashfs-root /app/katago
 COPY --from=katago /katago/net.bin.gz /app/net.bin.gz
 COPY analysis.cfg /app/analysis.cfg
 
-# Bei WITH_VISION=0 ist das ein leeres Verzeichnis — der Quellbaum landet dann
-# gar nicht erst im Image.
-COPY --from=vision-src /vision-python /app/vision-python
-
-RUN if [ "$WITH_VISION" = "1" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip libgl1 libglib2.0-0 \
-   && pip3 install --no-cache-dir "/app/vision-python[onnx]" \
-   && rm -rf /var/lib/apt/lists/* ; \
-    fi
-
 # analysis.cfg schreibt Engine-Logs nach ./analysis_logs (relativ zum CWD).
 RUN mkdir -p /app/analysis_logs && chown -R goteach:goteach /app
 
@@ -101,10 +70,6 @@ ENV KATAGO_PATH=/app/katago/AppRun \
     KATAGO_MODEL=/app/net.bin.gz \
     KATAGO_CONFIG=/app/analysis.cfg \
     PORT=8080
-
-# Ohne GOTEACH_VISION_CMD meldet der Dienst die Bilderkennung als nicht
-# eingerichtet (HTTP 501) — genau richtig für Images ohne WITH_VISION=1.
-ENV GOTEACH_VISION_CMD=""
 
 USER goteach
 EXPOSE 8080

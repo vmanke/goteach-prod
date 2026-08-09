@@ -1,10 +1,9 @@
 # goteach — Go-Analyse mit Teaching pro Zug
 
-Umsetzung der hybriden Go-Analysearchitektur: Stufen 3–6 in Go
-(symbolischer Brettzustand → Gruppensegmentierung → KataGo-Ownership →
-situatives Stärkemaß) und die Stufen 1–2 — Homographie und preinformed
-U-Net — als Python/ONNX-Teilprojekt unter `vision/python/`. Kernfeature
-bleibt **Teaching pro Zug**:
+Umsetzung der Go-Analysearchitektur: symbolischer Brettzustand →
+Gruppensegmentierung → KataGo-Ownership → situatives Stärkemaß. Eingabe ist
+immer eine SGF-Partie; es gibt keinen Bildpfad, weil Go-Partien als SGF
+vorliegen und KataGo darauf rechnet. Kernfeature bleibt **Teaching pro Zug**:
 Für jeden Zug einer SGF-Partie entsteht eine deutsche Lehreinheit mit
 Bewertungskategorie, Punktverlust, Gewinnchancen-Verlauf, Engine-Erstwahl
 samt Variante, Gruppeneffekten (Stärke, Atari, Schlagen, Benson-Status)
@@ -20,7 +19,6 @@ und einem faktenbasierten Merksatz.
 | `katago`           | Client der KataGo Analysis Engine (JSON/stdin-stdout) + Mock für Tests |
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
 | `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Schnapp  |
-| `vision`           | Bilderkennung (Stufen 1–2): JSON-Stellungsformat + Aufruf des Erkenners |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
 | `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration)          |
 | `cmd/goteach`      | CLI                                                                     |
@@ -356,108 +354,6 @@ Mit `-moves` lässt sich der Feinschliff pro Zug weiterhin dazuschalten.
   ohne es erzählt. **Josekis fehlen bewusst**: Das sind Zugfolgen, keine
   lokalen Muster, und sie bräuchten eine Sequenzdatenbank.
 
-## Stufen 1–2: Bilderkennung (PNG → Stellung)
-
-Homographie und preinformed U-Net liegen im Python/ONNX-Stack unter
-`vision/python/` (Trainings-/CV-Ökosystem); die Go-Seite ruft ihn als
-Subprozess auf und bleibt damit weiterhin ohne externe Abhängigkeiten.
-Übergeben wird der schmale Vertrag aus `vision/adapter.go`:
-
-```json
-{ "size": 19, "komi": 7.5, "rows": ["...................", "...X...O...", "..."] }
-```
-
-`vision.FromJSON(...).Game()` liefert daraus eine analysierbare Stellung
-(`initialStones`, ohne Zughistorie).
-
-### Einrichtung
-
-```bash
-cd vision/python
-pip install -e ".[dev]"                 # Basis: Erkennung ohne ML
-pip install -e ".[dev,onnx,train]"      # zusätzlich U-Net-Inferenz und Training
-export GOTEACH_VISION_CMD="python3 -m goteach_vision detect -"
-```
-
-Ohne gesetztes `GOTEACH_VISION_CMD` ist die Bilderkennung schlicht nicht
-eingerichtet: Die CLI sagt das, der HTTP-Dienst antwortet mit 501. Genau so
-ist der Vercel-Pfad gedacht, wo kein Python-Stack mitläuft.
-
-### Nutzung
-
-```bash
-# eigenständig — stdout ist ausschließlich der JSON-Vertrag
-python3 -m goteach_vision detect brett.png --size 19 --komi 7.5
-
-# über goteach: Stellungsbericht statt Teaching pro Zug
-goteach -image brett.png -size 19 -mock
-
-# über den HTTP-Dienst
-curl -F "image=@brett.png" "localhost:8080/analyze?size=19"
-```
-
-Ein Bild trägt kein Komi. Ohne `--komi`/`-komi`/`?komi=` analysiert KataGo
-mit Komi 0 — für eine belastbare Bewertung sollte der Wert mitgegeben werden.
-
-Eine erkannte Stellung hat keine Zughistorie. Sie bekommt deshalb einen
-**Stellungsbericht** (`teaching.AnalyzePosition`): Gewinnchance, ScoreLead,
-Engine-Erstwahl samt Variante und pro Kette Stärke, Freiheiten, Atari- und
-Benson-Status. Teaching pro Zug gibt es dort nicht — ohne Zug kein Zugfehler.
-
-### Wie die Erkennung arbeitet
-
-**Stufe 1 (Homographie)** ist bewusst klassisches CV statt eines zweiten
-Netzes: Die beiden Linienbüschel eines Go-Gitters bestimmen die Homographie
-vollständig, und bei achsparallelen Screenshots degeneriert sie *rechnerisch*
-zu Skalierung plus Zuschnitt. Screenshots und Fotos teilen sich damit einen
-Codepfad, ohne Fallunterscheidung. Die Brettgröße (9/13/19) entsteht nicht
-aus gezählten Linien, sondern aus Projektionsprofilen im entzerrten Bild —
-auf dicht besetzten Brettern sind einzelne Linien von Steinen verdeckt, das
-periodische Muster aller Linien aber nicht.
-
-**Stufe 2 (preinformed U-Net)** bekommt die Geometrie als Zusatzkanäle:
-6×512×512, davon RGB plus Gittermaske und die signierten Abstände zur
-nächsten Linie. Weil diese Kanäle die Gitterteilung mitführen, bedienen
-dieselben Gewichte 9×9, 13×13 und 19×19. Ausgelesen wird pro Schnittpunkt
-über eine Kreisscheibe; die Konfidenz ist der Softmax-Abstand zwischen bester
-und zweitbester Klasse.
-
-**Trainingsdaten sind vollständig synthetisch.** Ein prozeduraler Renderer
-erzeugt beide Domänen — saubere Diagramme und foto-artige Bretter mit
-Holzmaserung, Kugelschattierung, Schlagschatten, Perspektive, Unschärfe,
-Rauschen und Verdeckungen. Labels fallen exakt an, weil der Renderer Stellung
-und Schnittpunktkoordinaten kennt.
-
-```bash
-python3 -m goteach_vision train --steps 2000 --out netz.pt --onnx netz.onnx
-python3 -m goteach_vision detect brett.png --weights netz.onnx
-```
-
-### Zwei Backends
-
-`--backend classical` entscheidet allein über die Helligkeit der
-Schnittpunkte und braucht kein Modell; das ist der CI-Pfad und die
-Sanity-Baseline. `--backend onnx` nutzt das U-Net (`--weights`). Ohne
-`--weights` wählt `auto` den klassischen Pfad.
-
-### Stand und Grenzen (gemessen, nicht geschätzt)
-
-- Sitzt der Rahmen, ist die Auslese auf realistischen Brettdarstellungen
-  praktisch fehlerfrei: **99,9 % je Schnittpunkt, 98,6 % der Bretter exakt**.
-- Die **Rahmensuche ist die offene Schwäche**: Sie trifft rund **72 %** der
-  Bretter; die übrigen verfehlt sie meist um genau eine Gitterteilung, weil
-  sie die Brettkante statt der ersten Gitterlinie nimmt. `--size` hilft
-  dagegen nicht, weil der Fehler die Lage betrifft, nicht die Größe.
-- Das klassische Backend meldet einen **weissen Stein im
-  Schwarzweiss-Druckdiagramm als leeren Punkt** — sein Inneres ist dort
-  exakt so hell wie das Papier. Ein Nachweis über die Steinkontur wurde
-  erprobt und wieder entfernt, weil er "diese Farbe ist unsichtbar" nicht
-  von "diese Farbe kommt nicht vor" trennt und im zweiten Fall Phantomsteine
-  erzeugt. Für diese Vorlagen ist das U-Net zuständig.
-- Ein rein synthetisch trainiertes Netz kann auf echten Fotos schwächer sein,
-  als die synthetische Validierung nahelegt. Der Weg, echte gelabelte Fotos
-  dazuzumischen, ist vorgesehen, aber nicht beschritten.
-
 ## Grenzen (bewusst und dokumentiert)
 
 - Einfaches Ko statt Positional Superko (für legale SGF-Partien ausreichend;
@@ -467,8 +363,6 @@ Sanity-Baseline. `--backend onnx` nutzt das U-Net (`--weights`). Ohne
 - Der Mock ist ein Distanz-Abkling-Einflussmodell — ausschließlich für
   Tests/CI/Pipeline-Demos, niemals für echtes Teaching.
 - SGF: nur Hauptvariante; rechteckige Bretter werden nicht unterstützt.
-- Bilderkennung: Die Rahmensuche verfehlt rund ein Viertel der Bretter um
-  eine Gitterteilung (Details im Abschnitt „Stufen 1–2").
 - Erzählstränge: Der Kopplungsgraph ist eine explorative Gruppierung mit
   kontrollierter Fehltrefferquote, kein Beleg für taktische Zusammenhänge
   (Details im Abschnitt „Erzählstränge").
@@ -498,10 +392,9 @@ Sanity-Baseline. `--backend onnx` nutzt das U-Net (`--weights`). Ohne
 `go vet ./...` und `go test ./...` grün. Abgedeckt: Schlagen, Selbstmord-
 und Ko-Verbot, SGF-Parsing inkl. Nachspielen, GTP-Roundtrip, Benson
 (Zwei-Augen lebendig / Ein-Auge nicht), Stärkemaß-Grenzwerte und
-τ-Lokalität, Teaching end-to-end (Mock) inkl. Bereichsauswahl `-from/-to`,
-der Stellungsvertrag des `vision`-Pakets, die Subprozess-Brücke gegen eine
-Erkenner-Attrappe (inkl. Timeout und stderr-Weitergabe), `AnalyzePosition`
-sowie der Bild-Upload des HTTP-Dienstes.
+τ-Lokalität, Teaching end-to-end (Mock) inkl. Bereichsauswahl `-from/-to`
+sowie die Eingabewege des HTTP-Dienstes (roher Body, Formularfeld,
+Datei-Upload, OGS).
 
 Für die Erzählstränge zusätzlich: der Stärketensor gegen das bestehende
 Kettenmaß verankert (für eine Einzelquelle müssen beide denselben Wert
@@ -511,12 +404,10 @@ unabhängige Spuren *und* gegen eine echte Kopplung, die Eindeutigkeit der
 Zug-Zuordnung, die Reproduzierbarkeit ganzer Stränge und die Rückkopplung,
 die nur die Stellungen der stärksten Stränge nachrechnet.
 
-Die Python-Seite prüft `pytest` unter `vision/python/`: PNG-Normalisierung
-(Alpha, Palette, Graustufen, 16 Bit), das kanonische Gitter, die Entzerrung
-inkl. Degeneration bei achsparallelen Vorlagen, den JSON-Vertrag und den
-Ende-zu-Ende-Roundtrip Render → Erkennung → Stellung. Alles ohne
-Modellgewichte; die torch-Tests (Netzform, Training, ONNX-Export gegen torch)
-überspringen sich, wenn torch fehlt.
+Die Python-Seite prüft `pytest` unter `analysis/python/`: Fensterbildung,
+Merkmalsaufbau und der JSON-Vertrag laufen ohne Modellgewichte; die
+torch-Tests (Netzform, bidirektionale Rückkopplung, Determinismus der
+Inferenz, ONNX-Export gegen torch) überspringen sich, wenn torch fehlt.
 
 ## Quellen
 
@@ -533,5 +424,5 @@ Modellgewichte; die torch-Tests (Netzform, Training, ONNX-Export gegen torch)
 - J. Theiler et al. (1992): Testing for nonlinearity in time series: the
   method of surrogate data. *Physica D* 58, 77–94 — Vorbild des zyklischen
   Surrogattests.
-- Interner Architekturbericht dieses Projekts (U-Net → KataGo-Ownership →
+- Interner Architekturbericht dieses Projekts (KataGo-Ownership →
   LLM-Interpretationsschicht).
