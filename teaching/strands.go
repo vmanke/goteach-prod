@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/vmanke/goteach-prod/board"
 	"github.com/vmanke/goteach-prod/shapes"
@@ -71,7 +72,7 @@ type instanceTrace struct {
 // lo ist der erste Turn, für den Ownership vorliegt (Stellung *vor* dem
 // ersten analysierten Zug); ownership[k] gehört zu Turn lo+k.
 func buildStrands(g *board.Game, positions []*board.Board, ownership [][]float64,
-	lo int, reports []MoveReport, tau float64) []Strand {
+	lo int, reports []MoveReport, tau float64, external [][]board.Point) []Strand {
 
 	if len(ownership) < 4 || len(reports) == 0 {
 		return nil
@@ -80,7 +81,10 @@ func buildStrands(g *board.Game, positions []*board.Board, ownership [][]float64
 	salience := salienceSeries(ownership)
 	traces := trackShapes(g.Size, positions, ownership, salience, lo, tau)
 
-	if len(traces) < 2 {
+	// Ohne vorgegebene Fenster brauchen wir mindestens zwei Formspuren — die
+	// Gegenden entstehen dann ja aus deren Kopplung. Gibt das gelernte Modul
+	// die Gegenden vor, sind Formen willkommen, aber nicht Bedingung.
+	if len(traces) < 2 && len(external) == 0 {
 		return nil
 	}
 
@@ -93,7 +97,6 @@ func buildStrands(g *board.Game, positions []*board.Board, ownership [][]float64
 	}
 
 	edges := couple(plain, MaxLag)
-	groups := components(labels, edges)
 
 	byLabel := map[string]instanceTrace{}
 
@@ -101,7 +104,104 @@ func buildStrands(g *board.Game, positions []*board.Board, ownership [][]float64
 		byLabel[tr.label] = tr
 	}
 
-	return assemble(g, groups, byLabel, edges, reports)
+	// Liefert das gelernte Modul Fenster, geben sie die Gegenden vor; sonst
+	// entstehen sie aus den Zusammenhangskomponenten des Kopplungsgraphen.
+	// Formen und Zahlen kommen in beiden Fällen aus demselben
+	// deterministischen Code — das gelernte Modul wählt aus, behauptet aber
+	// nichts.
+	var prepared []candidate
+
+	if len(external) > 0 {
+		prepared = candidatesFromRegions(g, external, traces)
+	} else {
+		prepared = candidatesFromComponents(g, components(labels, edges), byLabel)
+	}
+
+	return assemble(g, prepared, edges, reports)
+}
+
+// candidate ist eine Gegend samt der Formen, die dort liegen.
+type candidate struct {
+	labels []string
+	region []board.Point
+	shapes []shapes.Instance
+}
+
+func candidatesFromComponents(g *board.Game, groups [][]string,
+	byLabel map[string]instanceTrace) []candidate {
+
+	var out []candidate
+
+	for _, members := range groups {
+		c := candidate{labels: members}
+		seen := map[int]bool{}
+
+		for _, label := range members {
+			tr, ok := byLabel[label]
+
+			if !ok {
+				continue
+			}
+
+			c.shapes = append(c.shapes, tr.instance)
+
+			for _, s := range tr.instance.Stones {
+				if idx := s.Y*g.Size + s.X; !seen[idx] {
+					seen[idx] = true
+					c.region = append(c.region, s)
+				}
+			}
+		}
+
+		if len(c.region) > 0 {
+			out = append(out, c)
+		}
+	}
+
+	return out
+}
+
+// candidatesFromRegions ordnet jede Form dem Fenster zu, das die meisten
+// ihrer Steine enthält.
+func candidatesFromRegions(g *board.Game, regions [][]board.Point,
+	traces []instanceTrace) []candidate {
+
+	out := make([]candidate, len(regions))
+	inside := make([]map[int]bool, len(regions))
+
+	for i, region := range regions {
+		out[i].region = region
+		inside[i] = map[int]bool{}
+
+		for _, p := range region {
+			inside[i][p.Y*g.Size+p.X] = true
+		}
+	}
+
+	for _, tr := range traces {
+		best, bestCount := -1, 0
+
+		for i := range regions {
+			count := 0
+
+			for _, s := range tr.instance.Stones {
+				if inside[i][s.Y*g.Size+s.X] {
+					count++
+				}
+			}
+
+			if count > bestCount {
+				best, bestCount = i, count
+			}
+		}
+
+		if best >= 0 {
+			out[best].shapes = append(out[best].shapes, tr.instance)
+			out[best].labels = append(out[best].labels, tr.label)
+		}
+	}
+
+	return out
 }
 
 // salienceSeries bildet den Salienztensor: wie stark sich die Zugehörigkeit
@@ -239,43 +339,9 @@ func mean(field []float64, points []board.Point, size int) float64 {
 	return sum / float64(len(points))
 }
 
-// assemble baut aus den Komponenten die Stränge und ordnet ihnen Züge zu.
-func assemble(g *board.Game, groups [][]string, byLabel map[string]instanceTrace,
-	edges []Coupling, reports []MoveReport) []Strand {
-
-	type candidate struct {
-		labels []string
-		region []board.Point
-		shapes []shapes.Instance
-	}
-
-	var candidates []candidate
-
-	for _, members := range groups {
-		c := candidate{labels: members}
-		seen := map[int]bool{}
-
-		for _, label := range members {
-			tr, ok := byLabel[label]
-
-			if !ok {
-				continue
-			}
-
-			c.shapes = append(c.shapes, tr.instance)
-
-			for _, s := range tr.instance.Stones {
-				if idx := s.Y*g.Size + s.X; !seen[idx] {
-					seen[idx] = true
-					c.region = append(c.region, s)
-				}
-			}
-		}
-
-		if len(c.region) > 0 {
-			candidates = append(candidates, c)
-		}
-	}
+// assemble baut aus den Gegenden die Stränge und ordnet ihnen Züge zu.
+func assemble(g *board.Game, candidates []candidate, edges []Coupling,
+	reports []MoveReport) []Strand {
 
 	if len(candidates) == 0 {
 		return nil
@@ -569,10 +635,18 @@ func shapeNames(instances []shapes.Instance) string {
 	return strings.Join(out, ", ")
 }
 
+// capitalize schreibt den ersten Buchstaben groß — runenweise.
+//
+// s[:1] wäre falsch: "über" beginnt mit einem Zwei-Byte-Zeichen, und das
+// erste Byte allein ergibt kein gültiges UTF-8. Aus "über das ganze Brett"
+// wurde so ein Ersatzzeichen.
 func capitalize(s string) string {
 	if s == "" {
 		return s
 	}
 
-	return strings.ToUpper(s[:1]) + s[1:]
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+
+	return string(runes)
 }

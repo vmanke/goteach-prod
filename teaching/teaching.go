@@ -11,6 +11,7 @@
 package teaching
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -48,6 +49,10 @@ type Options struct {
 
 	// RefineTop begrenzt, wie viele Stränge nachgerechnet werden (0 = 3).
 	RefineTop int
+
+	// SalienceCommand überschreibt das Kommando des gelernten Salienzmoduls;
+	// leer heißt: aus der Umgebung (GOTEACH_SALIENCE_CMD).
+	SalienceCommand string
 }
 
 // GroupEffect beschreibt die Auswirkung eines Zuges auf eine Kette.
@@ -251,7 +256,31 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 				len(ownership))
 		}
 
-		report.Strands = buildStrands(g, positions, ownership, lo, reports, opt.Tau)
+		// Gelerntes Salienzmodul, falls eingerichtet: Es gibt die Gegenden
+		// vor. Schlägt der Aufruf fehl, bleibt es bei der deterministischen
+		// Fensterung — sie trägt für sich allein, das Modul ist eine
+		// Verbesserung und keine Voraussetzung.
+		var regions [][]board.Point
+
+		if SalienceConfigured() {
+			windows, serr := requestSalience(context.Background(), g.Size,
+				positions, ownership, lo, opt.SalienceCommand)
+
+			if serr != nil {
+				fmt.Fprintf(os.Stderr,
+					"teaching: Salienzmodul übersprungen: %v\n", serr)
+			} else {
+				regions = salienceRegions(windows, g.Size)
+
+				if opt.Progress {
+					fmt.Fprintf(os.Stderr,
+						"teaching: %d Fenster vom Salienzmodul\n", len(regions))
+				}
+			}
+		}
+
+		report.Strands = buildStrands(g, positions, ownership, lo, reports,
+			opt.Tau, regions)
 
 		// Rückkopplung: Die erkannten Stränge bestimmen, wo genauer
 		// gerechnet wird. Muss vor dem Feinschliff laufen, damit das LLM die

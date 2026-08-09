@@ -297,6 +297,38 @@ Vorkehrungen:
 „hängt zeitlich zusammen mit", nie „wurde entschieden durch" — im
 Strang-Prompt (`teaching/llm.go`) steht das als harte Regel.
 
+### Gelerntes Salienzmodul (optional)
+
+Die Fensterung lässt sich einem gelernten Modul überlassen — dem Teilprojekt
+`analysis/python/` (Paket `goteach-salience`). Es bekommt den Partieverlauf
+als JSON und liefert Fenster zurück; Formen und Zahlen kommen weiterhin aus
+demselben deterministischen Go-Code. **Das Modul wählt aus, es behauptet
+nichts.**
+
+```bash
+cd analysis/python && pip install -e ".[dev,onnx,train]"
+export GOTEACH_SALIENCE_CMD="python3 -m goteach_salience score -"
+./goteach -sgf partie.sgf -mock
+```
+
+Ohne gesetzte Variable — und ebenso, wenn der Aufruf scheitert — übernimmt
+die deterministische Fensterung. Das Modul ist eine Verbesserung, keine
+Voraussetzung.
+
+Das Netz ist ein Encoder-Decoder mit **bidirektionaler Rückkopplung**: An
+jeder Nichtlinearität trifft ein Signal von unten auf eines von oben, und
+welches ankommt, wird stochastisch gezogen. Zur Laufzeit wird über beide
+Richtungen gemittelt statt gewürfelt — sonst ergäbe dieselbe Partie zweimal
+analysiert nicht dasselbe Ergebnis, und der Export prüft genau das nach.
+Gelernt wird selbstüberwacht: vorhergesagt wird, wie stark sich die
+Zugehörigkeit eines Punktes in den nächsten zwölf Zügen noch verändert.
+Details in `analysis/python/README.md`.
+
+**Stand:** Die deterministische Fensterung liefert derzeit die besseren
+Stränge. Das Modul ist gebaut, geprüft und angebunden, aber auf synthetischen
+Partien trainiert; für belastbare Fenster bräuchte es echte Partien mit
+echter KataGo-Ownership.
+
 ### Rückkopplung: Rechenzeit dorthin, wo es zählt
 
 Mit `-refine-visits` rechnet KataGo in einer zweiten Runde die Stellungen der
@@ -440,6 +472,8 @@ Sanity-Baseline. `--backend onnx` nutzt das U-Net (`--weights`). Ohne
 - Erzählstränge: Der Kopplungsgraph ist eine explorative Gruppierung mit
   kontrollierter Fehltrefferquote, kein Beleg für taktische Zusammenhänge
   (Details im Abschnitt „Erzählstränge").
+- Das gelernte Salienzmodul ist auf synthetischen Partien trainiert; seine
+  Fenster sind gröber als die des Kopplungsgraphen.
 - Bekannte KataGo-Schwächen aus dem Architekturbericht (zyklische
   Adversarial-Gruppen; Leiter-Fehler bei sehr niedrigen Visits) gelten auch
   hier — im Zweifel `-visits` erhöhen.

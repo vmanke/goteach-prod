@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goteach-salience"
+version = "0.1.0"
+description = "Gelerntes Salienzmodul mit bidirektionaler Rueckkopplung"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Basis: Vertrag lesen, Fenster liefern. Ohne ML lauffaehig.
+dependencies = ["numpy>=1.24,<3"]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.16,<2"]
+train = ["torch>=2.1", "onnx>=1.15", "onnxscript>=0.1"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+goteach-salience = "goteach_salience.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["torch: braucht torch, wird sonst uebersprungen"]
