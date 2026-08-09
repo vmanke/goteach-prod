@@ -29,6 +29,56 @@ import (
 //     (fallbacks: "default", Beta-Header) aktiviert, der die Anfrage von
 //     einem Ersatzmodell beantworten lässt.
 func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error) {
+	const system = moveSystemPrompt
+
+	call := newPolishCall(apiKey, model, system)
+
+	return func(r *MoveReport) (string, error) {
+		return call(r)
+	}
+}
+
+// NewAnthropicStrandPolisher glättet den Text eines Erzählstrangs.
+//
+// Der eigentliche Gewinn ist die Zahl der Aufrufe: Ein Strang fasst viele
+// Züge zusammen, eine Partie kommt damit auf eine Handvoll Anfragen statt
+// auf eine je Zug.
+//
+// Die zusätzliche Regel gegenüber dem Zug-Prompt ist die wichtigste hier:
+// Gekoppelte Formen dürfen nicht kausal verknüpft werden. Die
+// Kreuzkorrelation zeigt einen zeitlichen Zusammenhang; "A wurde durch B
+// entschieden" wäre eine Behauptung, die die Daten nicht hergeben.
+func NewAnthropicStrandPolisher(apiKey, model string) func(*Strand) (string, error) {
+	call := newPolishCall(apiKey, model, strandSystemPrompt)
+
+	return func(s *Strand) (string, error) {
+		return call(s)
+	}
+}
+
+const moveSystemPrompt = "Sie sind ein erfahrener Go-Lehrer (Baduk/Weiqi). " +
+	"Formulieren Sie die gegebene, faktisch verifizierte Zuganalyse als " +
+	"kurzen, klaren Lehrtext auf Deutsch (Sie-Form, max. 120 Wörter). " +
+	"STRIKTE REGELN: Verwenden Sie AUSSCHLIESSLICH die gelieferten " +
+	"Zahlen, Koordinaten und Züge. Erfinden Sie keine neuen Züge, " +
+	"Varianten, Zahlen oder taktischen Behauptungen. Bei Unsicherheit " +
+	"lassen Sie Details weg, statt zu spekulieren."
+
+const strandSystemPrompt = "Sie sind ein erfahrener Go-Lehrer (Baduk/Weiqi). " +
+	"Sie erhalten einen Abschnitt einer Partie — eine Brettgegend über einen " +
+	"Zugbereich — mit verifizierten Zahlen und benannten Formen. " +
+	"Erzählen Sie diesen Abschnitt als zusammenhängenden Lehrtext auf " +
+	"Deutsch (Sie-Form, max. 150 Wörter). " +
+	"STRIKTE REGELN: Verwenden Sie AUSSCHLIESSLICH die gelieferten Zahlen, " +
+	"Koordinaten, Zugnummern und Formnamen. Erfinden Sie keine Züge, " +
+	"Varianten oder Bewertungen. Die Angabe gekoppelter Formen bedeutet " +
+	"einen ZEITLICHEN Zusammenhang, KEINE Ursache: Schreiben Sie " +
+	"\"hängt zeitlich damit zusammen\" und niemals \"wurde dadurch " +
+	"entschieden\" oder \"führte zu\". Bei Unsicherheit lassen Sie " +
+	"Details weg, statt zu spekulieren."
+
+// newPolishCall baut den gemeinsamen HTTP-Aufruf für beide Polisher.
+func newPolishCall(apiKey, model, system string) func(any) (string, error) {
 	client := &http.Client{Timeout: 120 * time.Second}
 
 	// Server-Fallback nur auf Modellen anfordern, die ihn unterstützen.
@@ -36,16 +86,8 @@ func NewAnthropicPolisher(apiKey, model string) func(*MoveReport) (string, error
 		strings.HasPrefix(model, "claude-mythos-5") ||
 		strings.HasPrefix(model, "claude-opus-5")
 
-	const system = "Sie sind ein erfahrener Go-Lehrer (Baduk/Weiqi). " +
-		"Formulieren Sie die gegebene, faktisch verifizierte Zuganalyse als " +
-		"kurzen, klaren Lehrtext auf Deutsch (Sie-Form, max. 120 Wörter). " +
-		"STRIKTE REGELN: Verwenden Sie AUSSCHLIESSLICH die gelieferten " +
-		"Zahlen, Koordinaten und Züge. Erfinden Sie keine neuen Züge, " +
-		"Varianten, Zahlen oder taktischen Behauptungen. Bei Unsicherheit " +
-		"lassen Sie Details weg, statt zu spekulieren."
-
-	return func(r *MoveReport) (string, error) {
-		facts, err := json.Marshal(r)
+	return func(payload any) (string, error) {
+		facts, err := json.Marshal(payload)
 
 		if err != nil {
 			return "", err

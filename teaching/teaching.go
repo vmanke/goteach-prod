@@ -33,8 +33,21 @@ type Options struct {
 	To       int      // letzter Zug (inklusive), 0 = Partieende
 	Progress bool
 
-	// Polish ist ein optionaler LLM-Feinschliff (nur Umformulierung).
+	// Polish ist ein optionaler LLM-Feinschliff pro Zug (nur Umformulierung).
 	Polish func(*MoveReport) (string, error)
+
+	// PolishStrand ist derselbe Feinschliff für Erzählstränge. Er kostet
+	// einen Aufruf je Strang statt je Zug — bei einer typischen Partie eine
+	// Handvoll statt einiger hundert.
+	PolishStrand func(*Strand) (string, error)
+
+	// RefineVisits rechnet die stärksten Erzählstränge in einer zweiten
+	// Runde mit dieser Visit-Zahl nach. Kleiner oder gleich Visits schaltet
+	// die Rückkopplung ab.
+	RefineVisits int
+
+	// RefineTop begrenzt, wie viele Stränge nachgerechnet werden (0 = 3).
+	RefineTop int
 }
 
 // GroupEffect beschreibt die Auswirkung eines Zuges auf eine Kette.
@@ -73,6 +86,24 @@ type MoveReport struct {
 // reportAnalysisWinratesAs = BLACK; Winrate/ScoreLead/Ownership sind daher
 // aus Schwarz-Sicht und werden hier auf die Sicht des Ziehenden normiert.
 func Analyze(g *board.Game, an katago.Analyzer, opt Options) ([]MoveReport, error) {
+	report, err := analyzeCore(g, an, opt, false)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return report.Moves, nil
+}
+
+// analyzeCore trägt die gemeinsame Arbeit von Analyze und AnalyzeGame.
+//
+// Der Unterschied ist allein withStrands: Nur dafür werden die
+// Ownership-Felder aufbewahrt, statt nach dem Ableiten der Skalare verworfen
+// zu werden. Sie kosten rund 0,7 MB je Partie — ohne sie gäbe es keine
+// Analyse über Region und Zeit.
+func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
+	withStrands bool) (*GameReport, error) {
+
 	if opt.Tau <= 0 {
 		opt.Tau = 3.0
 	}
@@ -193,7 +224,63 @@ func Analyze(g *board.Game, an katago.Analyzer, opt Options) ([]MoveReport, erro
 		}
 	}
 
-	return reports, nil
+	report := &GameReport{
+		Size:  g.Size,
+		Komi:  req.Komi,
+		Rules: req.Rules,
+		Moves: reports,
+	}
+
+	if withStrands {
+		lo := from - 1
+		ownership := make([][]float64, 0, len(turns))
+
+		for t := lo; t <= to; t++ {
+			a := byTurn[t]
+
+			if a == nil {
+				break
+			}
+
+			ownership = append(ownership, a.Ownership)
+		}
+
+		if opt.Progress {
+			fmt.Fprintf(os.Stderr,
+				"teaching: suche Erzählstränge über %d Stellungen ...\n",
+				len(ownership))
+		}
+
+		report.Strands = buildStrands(g, positions, ownership, lo, reports, opt.Tau)
+
+		// Rückkopplung: Die erkannten Stränge bestimmen, wo genauer
+		// gerechnet wird. Muss vor dem Feinschliff laufen, damit das LLM die
+		// verfeinerten Zahlen sieht.
+		if err := refine(g, an, opt, req, positions, report); err != nil {
+			return nil, err
+		}
+
+		if opt.PolishStrand != nil {
+			for i := range report.Strands {
+				s := &report.Strands[i]
+
+				if txt, perr := opt.PolishStrand(s); perr == nil {
+					s.TextLLM = txt
+				} else {
+					fmt.Fprintf(os.Stderr,
+						"teaching: LLM-Feinschliff Strang %d übersprungen: %v\n",
+						s.ID, perr)
+				}
+			}
+		}
+
+		if opt.Progress {
+			fmt.Fprintf(os.Stderr, "teaching: %d Stränge gefunden\n",
+				len(report.Strands))
+		}
+	}
+
+	return report, nil
 }
 
 func buildReport(i int, mv board.Move, size int, bb, ab *board.Board,

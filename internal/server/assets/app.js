@@ -147,6 +147,10 @@
     var summary = payload.moves + ' Züge, Brett ' + payload.size + '×' +
       payload.size + ', Komi ' + payload.komi;
 
+    if (payload.strands && payload.strands.length) {
+      summary = payload.strands.length + ' Erzählstränge aus ' + summary;
+    }
+
     if (payload.rules) {
       summary += ', Regeln ' + payload.rules;
     }
@@ -172,6 +176,8 @@
     if (payload.position) {
       renderPosition(payload.position);
     }
+
+    (payload.strands || []).forEach(renderStrand);
 
     (payload.reports || []).forEach(function (report) {
       var article = document.createElement('article');
@@ -201,6 +207,43 @@
     results.hidden = false;
     downloadBtn.hidden = false;
     results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // Ein Erzählstrang: die Hauptsicht auf eine Partie. Zug-Reports bleiben
+  // darunter als Detailebene stehen.
+  function renderStrand(strand) {
+    var article = document.createElement('article');
+    article.className = 'report';
+
+    var head = document.createElement('header');
+    var title = document.createElement('strong');
+    title.textContent = 'Strang ' + strand.id + ' — ' + strand.area +
+      ', Züge ' + strand.fromMove + '–' + strand.toMove;
+    head.appendChild(title);
+
+    var badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = (strand.moves || []).length + ' Züge';
+    head.appendChild(badge);
+    article.appendChild(head);
+
+    var text = document.createElement('pre');
+    text.className = 'report-text';
+    text.textContent = strand.textLLM || strand.text || '';
+    article.appendChild(text);
+
+    (strand.couplings || []).forEach(function (coupling) {
+      var line = document.createElement('div');
+
+      // Bewusst "hängt zeitlich zusammen": Die Kreuzkorrelation zeigt einen
+      // Zusammenhang über die Zeit, keine Ursache.
+      line.textContent = coupling.from + ' hängt zeitlich zusammen mit ' +
+        coupling.to + ' (r = ' + coupling.correlation.toFixed(2) +
+        ', Versatz ' + coupling.lag + ' Züge)';
+      article.appendChild(line);
+    });
+
+    resultsList.appendChild(article);
   }
 
   // Stellungsbericht eines erkannten Bretts: Lehrtext plus Kettenliste.

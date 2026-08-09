@@ -157,12 +157,17 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // analyzeResponse ist die JSON-Antwort von POST /analyze.
 type analyzeResponse struct {
-	Size      int                   `json:"size"`
-	Komi      float64               `json:"komi"`
-	Rules     string                `json:"rules,omitempty"`
-	Moves     int                   `json:"moves"`
-	Synthetic bool                  `json:"synthetic"`
-	Reports   []teaching.MoveReport `json:"reports,omitempty"`
+	Size      int     `json:"size"`
+	Komi      float64 `json:"komi"`
+	Rules     string  `json:"rules,omitempty"`
+	Moves     int     `json:"moves"`
+	Synthetic bool    `json:"synthetic"`
+	// Strands ist die Hauptsicht auf eine Partie: zusammenhängende
+	// Abschnitte statt einer Wand aus Einzelzügen. Reports bleibt als
+	// Detailebene darunter erhalten.
+	Strands []teaching.Strand `json:"strands,omitempty"`
+
+	Reports []teaching.MoveReport `json:"reports,omitempty"`
 
 	// Position steht statt Reports, wenn die Anfrage ein Brettfoto war:
 	// Eine erkannte Stellung hat keine Zughistorie und damit keine
@@ -257,7 +262,7 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	reports, err := teaching.Analyze(game, an, opt)
+	report, err := teaching.AnalyzeGame(game, an, opt)
 
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Analyse: %v", err)
@@ -290,7 +295,8 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		Rules:     effRules,
 		Moves:     len(game.Moves),
 		Synthetic: synthetic,
-		Reports:   reports,
+		Strands:   report.Strands,
+		Reports:   report.Moves,
 	})
 }
 

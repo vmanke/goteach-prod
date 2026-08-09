@@ -16,9 +16,10 @@ und einem faktenbasierten Merksatz.
 |--------------------|------------------------------------------------------------------------|
 | `board`            | Brett, Züge, Schlagen, Selbstmord-/Ko-Verbot, Zobrist-Hash, SGF, Koordinaten |
 | `groups`           | Ketten mit Freiheiten; Bensons unbedingtes Leben (1976) als exakter Cross-Check |
-| `strength`         | Situative Gruppenstärke: distanzgewichtete Ownership-Aggregation (exp(−d/τ)) |
+| `strength`         | Situative Gruppenstärke je Kette und als Feld über alle Punkte (exp(−d/τ)) |
 | `katago`           | Client der KataGo Analysis Engine (JSON/stdin-stdout) + Mock für Tests |
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
+| `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Schnapp  |
 | `vision`           | Bilderkennung (Stufen 1–2): JSON-Stellungsformat + Aufruf des Erkenners |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
 | `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration)          |
@@ -221,6 +222,108 @@ umformulieren; der verifizierte Basistext bleibt immer erhalten
 KataGo-Rechenaufwand ≈ Visits × (Zuganzahl + 1); `-llm` erzeugt einen
 API-Call pro Zug — bei langen Partien `-from/-to` nutzen.
 
+## Erzählstränge statt Zugliste
+
+Eine Partie mit 250 Zügen ergab bisher 250 Lehreinheiten, die nichts
+voneinander wussten — eine Textwand. `goteach` zerlegt eine Partie deshalb
+zuerst in **Erzählstränge**: zusammenhängende Abschnitte über Brettgegend und
+Zugbereich, mit benannten Formen und nachgerechneter Bilanz.
+
+```bash
+./goteach -sgf partie.sgf -mock                  # Stränge (Standard)
+./goteach -sgf partie.sgf -mock -moves           # zusätzlich jeder Zug einzeln
+./goteach -sgf partie.sgf ... -refine-visits 800 # Rechenzeit in die Entscheidung
+```
+
+Beispielausgabe:
+
+```
+[3] Oben links, Züge 12 bis 48 (19 davon gehören hierher). Beteiligte Formen:
+    Leiter D17, Kreuzschnitt E16, leeres Dreieck C15. Schwarz verliert hier
+    11.4 Punkte. 6 Steine werden geschlagen. Der teuerste Zug ist 34
+    (Schwarz D18, Fehler, 5.2 Punkte).
+    gekoppelt: Leiter D17 ↔ Kreuzschnitt E16 (r = +0.81, Versatz 3)
+```
+
+### Wie ein Strang entsteht
+
+1. **Salienztensor.** Aus den Ownership-Feldern, die KataGo ohnehin je
+   Stellung liefert, entsteht `S[t, y, x]` — wie stark sich die Zugehörigkeit
+   jedes Punktes mit jedem Zug ändert. Diese Felder wurden bisher nach dem
+   Ableiten der Skalare verworfen; sie aufzubewahren kostet rund 0,7 MB je
+   Partie und ist die Voraussetzung für alles Weitere.
+2. **Formen benennen** (Paket `shapes`). Deterministisch, ohne Modell: leeres
+   Dreieck, Bambusverbindung, Tigermaul, Kosumi, Ein- und Zwei-Punkte-Sprung,
+   Kleiner und Großer Springerzug, Kreuzschnitt — jeweils über alle acht
+   Symmetrien des Quadrats und beide Farbrollen. Dazu die Motive, die eine
+   Variantensuche brauchen: **Leiter**, **Netz** und **Schnapp**. Damit löst
+   das Paket ein Versprechen ein, das der Lehrtext bisher an den Spieler
+   weiterreichte („lesen Sie die Leiter") — ohne es selbst zu können.
+3. **Formen in Relation setzen.** Jede Forminstanz bekommt zwei Zeitspuren:
+   ihre Salienz und ihre Stärke (aus `strength.Field`, dem Stärkemaß pro
+   Punkt statt pro Kette). Zwischen je zwei Formen wird die normierte
+   Kreuzkorrelation mit Versatz gerechnet.
+4. **Fenstern.** Stränge sind die Zusammenhangskomponenten dieses
+   Kopplungsgraphen — nicht bloß räumlich benachbarte Gebiete. Damit landet
+   die Leiter am einen Brettrand im selben Strang wie der Kampf am anderen,
+   den sie entscheidet.
+5. **Zuordnen und rechnen.** Jeder Zug geht an höchstens einen Strang, den
+   räumlich nächsten; nur so ist die Bilanz eines Strangs nachrechenbar. Ein
+   Zug weitab jeder erkannten Form gehört zu keinem Strang — das ist der
+   Normalfall für ruhige Passagen und keine Lücke.
+
+### Statistische Absicherung
+
+Bei einem Dutzend Formen werden 66 Paare geprüft, jeweils über 41 Versätze.
+Ohne Absicherung wäre der Kopplungsgraph zum großen Teil Einbildung. Drei
+Vorkehrungen:
+
+- **Permutationstest je Paar.** Die Nullverteilung entsteht durch zyklisches
+  Verschieben einer Spur — das zerstört den Zusammenhang, erhält aber Länge
+  und Eigenkorrelation. Die Verschiebung muss dabei den Versatzbereich
+  überschreiten, sonst findet die Versatzsuche denselben Zusammenhang einfach
+  wieder und die „Nullverteilung" enthält noch das Signal, das sie widerlegen
+  soll.
+- **Fehltrefferkontrolle** über Benjamini-Hochberg. Die Korrektur läuft über
+  *alle* geprüften Paare; erst danach greift die Effektstärke-Schranke.
+  Umgekehrt wäre sie schwächer statt strenger, weil große Korrelationen
+  kleine p-Werte haben.
+- **Effektstärke-Schranke.** Existiert eine Form nur kurz, sind alle ihre
+  Korrelationen winzig — und dann liegt schon ein r von 0.01 weit über der
+  mitgeschrumpften Nullverteilung. Signifikanz ohne Effektstärke ist keine
+  Erkenntnis, deshalb gilt zusätzlich |r| ≥ 0.30.
+
+**Und eine Sprachregel:** Korrelation ist keine Kausalität. Der Lehrtext sagt
+„hängt zeitlich zusammen mit", nie „wurde entschieden durch" — im
+Strang-Prompt (`teaching/llm.go`) steht das als harte Regel.
+
+### Rückkopplung: Rechenzeit dorthin, wo es zählt
+
+Mit `-refine-visits` rechnet KataGo in einer zweiten Runde die Stellungen der
+stärksten Stränge mit höherer Visit-Zahl nach. Die Segmentierung bleibt dabei
+unangetastet — sie war die Grundlage der Auswahl; sie nachträglich mit den
+verfeinerten Zahlen zu verschieben hieße, sich im Kreis zu drehen.
+
+### Kosten
+
+Der LLM-Feinschliff kostet einen Aufruf **je Strang** statt je Zug. Eine
+Partie mit 250 Zügen kommt damit auf eine Handvoll Anfragen statt auf 250.
+Mit `-moves` lässt sich der Feinschliff pro Zug weiterhin dazuschalten.
+
+### Grenzen
+
+- Der `-mock`-Analyzer benutzt die Distanz zum *nächstgelegenen* Stein. Auf
+  dicht besetzten Brettern sättigt dieses Feld, die Salienzspuren bestehen
+  dann aus wenigen Ausschlägen und es entstehen keine Stränge. Das ist eine
+  Eigenschaft des Mocks, nicht der Analyse: KataGos Ownership verschiebt sich
+  mit jedem Zug über das ganze Brett.
+- Fenstergrenzen sind eine Erzählentscheidung, keine Spielwahrheit. Die
+  Fakten je Strang werden deshalb auf dem ganzen Brett gerechnet.
+- Der Formenkatalog ist nicht vollständig. Ein unbenanntes Motiv erscheint
+  nicht als „nichts Besonderes", sondern gar nicht — der Strang wird dann
+  ohne es erzählt. **Josekis fehlen bewusst**: Das sind Zugfolgen, keine
+  lokalen Muster, und sie bräuchten eine Sequenzdatenbank.
+
 ## Stufen 1–2: Bilderkennung (PNG → Stellung)
 
 Homographie und preinformed U-Net liegen im Python/ONNX-Stack unter
@@ -334,6 +437,9 @@ Sanity-Baseline. `--backend onnx` nutzt das U-Net (`--weights`). Ohne
 - SGF: nur Hauptvariante; rechteckige Bretter werden nicht unterstützt.
 - Bilderkennung: Die Rahmensuche verfehlt rund ein Viertel der Bretter um
   eine Gitterteilung (Details im Abschnitt „Stufen 1–2").
+- Erzählstränge: Der Kopplungsgraph ist eine explorative Gruppierung mit
+  kontrollierter Fehltrefferquote, kein Beleg für taktische Zusammenhänge
+  (Details im Abschnitt „Erzählstränge").
 - Bekannte KataGo-Schwächen aus dem Architekturbericht (zyklische
   Adversarial-Gruppen; Leiter-Fehler bei sehr niedrigen Visits) gelten auch
   hier — im Zweifel `-visits` erhöhen.
@@ -363,6 +469,14 @@ der Stellungsvertrag des `vision`-Pakets, die Subprozess-Brücke gegen eine
 Erkenner-Attrappe (inkl. Timeout und stderr-Weitergabe), `AnalyzePosition`
 sowie der Bild-Upload des HTTP-Dienstes.
 
+Für die Erzählstränge zusätzlich: der Stärketensor gegen das bestehende
+Kettenmaß verankert (für eine Einzelquelle müssen beide denselben Wert
+liefern), Formenerkennung in allen acht Symmetrien und beiden Farben, ein
+Leiterleser mit Gegenprobe am Ausbruchstein, der Permutationstest gegen
+unabhängige Spuren *und* gegen eine echte Kopplung, die Eindeutigkeit der
+Zug-Zuordnung, die Reproduzierbarkeit ganzer Stränge und die Rückkopplung,
+die nur die Stellungen der stärksten Stränge nachrechnet.
+
 Die Python-Seite prüft `pytest` unter `vision/python/`: PNG-Normalisierung
 (Alpha, Palette, Graustufen, 16 Bit), das kanonische Gitter, die Entzerrung
 inkl. Degeneration bei achsparallelen Vorlagen, den JSON-Vertrag und den
@@ -379,5 +493,11 @@ Modellgewichte; die torch-Tests (Netzform, Training, ONNX-Export gegen torch)
 - A. L. Zobrist (1969): A model of visual organization for the game of Go;
   B. Bouzy (2003): Mathematical morphology applied to computer Go —
   Vorbilder des distanzgewichteten Einfluss-/Stärkemaßes.
+- Y. Benjamini, Y. Hochberg (1995): Controlling the False Discovery Rate.
+  *J. R. Statist. Soc. B* 57, 289–300 — Grundlage der Kantenauswahl im
+  Kopplungsgraphen.
+- J. Theiler et al. (1992): Testing for nonlinearity in time series: the
+  method of surrogate data. *Physica D* 58, 77–94 — Vorbild des zyklischen
+  Surrogattests.
 - Interner Architekturbericht dieses Projekts (U-Net → KataGo-Ownership →
   LLM-Interpretationsschicht).
