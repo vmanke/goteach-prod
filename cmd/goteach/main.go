@@ -7,10 +7,15 @@
 //	        -model kata.bin.gz -config analysis.cfg -visits 200
 //	goteach -sgf demo/demo.sgf -mock            # Offline-Demo ohne Engine
 //	goteach -sgf partie.sgf ... -json out.json  # zusätzlich JSON-Export
+//	goteach -image brett.png -mock              # Stellung aus einem Foto/Diagramm
+//	goteach -sgf partie.sgf ... -refine-visits 800  # Rechenzeit dorthin, wo
+//	                                                # die Partie entschieden wurde
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -21,6 +26,7 @@ import (
 	"github.com/vmanke/goteach-prod/internal/dotenv"
 	"github.com/vmanke/goteach-prod/katago"
 	"github.com/vmanke/goteach-prod/teaching"
+	"github.com/vmanke/goteach-prod/vision"
 )
 
 func main() {
@@ -32,7 +38,10 @@ func main() {
 
 func run() error {
 	var (
-		sgfPath    = flag.String("sgf", "", "Pfad zur SGF-Datei (erforderlich)")
+		sgfPath   = flag.String("sgf", "", "Pfad zur SGF-Datei (oder -image)")
+		imagePath = flag.String("image", "", "PNG eines Bretts statt einer Partie "+
+			"(Erkenner über "+vision.EnvCommand+"); ergibt einen Stellungsbericht")
+		boardSize  = flag.Int("size", 0, "Brettgröße für -image erzwingen (9, 13, 19)")
 		katagoPath = flag.String("katago", "katago", "Pfad zur KataGo-Binary")
 		modelPath  = flag.String("model", "", "Pfad zum KataGo-Netz (.bin.gz)")
 		configPath = flag.String("config", "analysis.cfg",
@@ -45,6 +54,13 @@ func run() error {
 		to     = flag.Int("to", 0, "letzter Zug (0 = Partieende)")
 		mock   = flag.Bool("mock", false,
 			"Mock-Analyzer statt KataGo (SYNTHETISCHE Werte, nur Demo/Tests)")
+		withMoves = flag.Bool("moves", false,
+			"zusätzlich die Lehreinheit zu jedem einzelnen Zug ausgeben")
+		refineVisits = flag.Int("refine-visits", 0,
+			"zweite Analyse-Runde auf den stärksten Strängen mit dieser "+
+				"Visit-Zahl (0 = aus)")
+		refineTop = flag.Int("refine-top", 0,
+			"wie viele Stränge nachgerechnet werden (0 = 3)")
 		jsonOut  = flag.String("json", "", "Reports zusätzlich als JSON schreiben")
 		useLLM   = flag.Bool("llm", false, "LLM-Feinschliff (ANTHROPIC_API_KEY aus .env)")
 		llmModel = flag.String("llm-model", "claude-fable-5",
@@ -53,10 +69,10 @@ func run() error {
 
 	flag.Parse()
 
-	if *sgfPath == "" {
+	if (*sgfPath == "") == (*imagePath == "") {
 		flag.Usage()
 
-		return fmt.Errorf("-sgf fehlt")
+		return fmt.Errorf("genau eines von -sgf oder -image angeben")
 	}
 
 	// Secrets ausschließlich aus Umgebung/.env (nie als Flag).
@@ -64,13 +80,20 @@ func run() error {
 		return fmt.Errorf(".env: %w", err)
 	}
 
-	data, err := os.ReadFile(*sgfPath)
+	var (
+		game *board.Game
+		err  error
+	)
 
-	if err != nil {
-		return err
+	if *imagePath != "" {
+		game, err = gameFromImage(*imagePath, *boardSize, komi)
+	} else {
+		var data []byte
+
+		if data, err = os.ReadFile(*sgfPath); err == nil {
+			game, err = board.ParseSGF(string(data))
+		}
 	}
-
-	game, err := board.ParseSGF(string(data))
 
 	if err != nil {
 		return err
@@ -111,12 +134,14 @@ func run() error {
 	defer an.Close()
 
 	opt := teaching.Options{
-		Visits:   *visits,
-		Tau:      *tau,
-		Rules:    *rules,
-		From:     *from,
-		To:       *to,
-		Progress: true,
+		Visits:       *visits,
+		Tau:          *tau,
+		Rules:        *rules,
+		From:         *from,
+		To:           *to,
+		Progress:     true,
+		RefineVisits: *refineVisits,
+		RefineTop:    *refineTop,
 	}
 
 	if !math.IsNaN(*komi) {
@@ -131,30 +156,45 @@ func run() error {
 		}
 
 		fmt.Fprintf(os.Stderr,
-			"goteach: LLM-Feinschliff aktiv (%s) — Kostenhinweis: 1 API-Call pro Zug.\n",
-			*llmModel)
-		opt.Polish = teaching.NewAnthropicPolisher(key, *llmModel)
+			"goteach: LLM-Feinschliff aktiv (%s) — 1 API-Call je Strang"+
+				", mit -moves zusätzlich einer je Zug.\n", *llmModel)
+
+		opt.PolishStrand = teaching.NewAnthropicStrandPolisher(key, *llmModel)
+
+		if *withMoves {
+			opt.Polish = teaching.NewAnthropicPolisher(key, *llmModel)
+		}
 	}
 
-	reports, err := teaching.Analyze(game, an, opt)
+	// Eine erkannte Stellung hat keine Zughistorie und damit auch keine
+	// Lehreinheit pro Zug; sie bekommt einen Stellungsbericht.
+	if *imagePath != "" {
+		return reportPosition(game, an, opt, *jsonOut)
+	}
+
+	report, err := teaching.AnalyzeGame(game, an, opt)
 
 	if err != nil {
 		return err
 	}
 
-	for i := range reports {
-		r := &reports[i]
-		fmt.Println(r.Text)
+	printStrands(report)
 
-		if r.TextLLM != "" {
-			fmt.Printf("Lehrtext (LLM): %s\n", r.TextLLM)
+	if *withMoves {
+		for i := range report.Moves {
+			r := &report.Moves[i]
+			fmt.Println(r.Text)
+
+			if r.TextLLM != "" {
+				fmt.Printf("Lehrtext (LLM): %s\n", r.TextLLM)
+			}
+
+			fmt.Println()
 		}
-
-		fmt.Println()
 	}
 
 	if *jsonOut != "" {
-		buf, err := json.MarshalIndent(reports, "", "  ")
+		buf, err := json.MarshalIndent(report, "", "  ")
 
 		if err != nil {
 			return err
@@ -167,7 +207,123 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "goteach: JSON-Report → %s\n", *jsonOut)
 	}
 
-	printSummary(reports)
+	printSummary(report.Moves)
+
+	return nil
+}
+
+// printStrands gibt die Erzählstränge aus — die Hauptsicht auf eine Partie.
+func printStrands(report *teaching.GameReport) {
+	if len(report.Strands) == 0 {
+		fmt.Println("Keine Erzählstränge gefunden — die Partie verlief ohne " +
+			"erkennbar zusammenhängende Kämpfe.")
+		fmt.Println()
+
+		return
+	}
+
+	fmt.Printf("Erzählstränge (%d)\n", len(report.Strands))
+	fmt.Println("==================")
+	fmt.Println()
+
+	for i := range report.Strands {
+		s := &report.Strands[i]
+
+		fmt.Printf("[%d] %s\n", s.ID, s.Text)
+
+		if s.TextLLM != "" {
+			fmt.Printf("    Lehrtext (LLM): %s\n", s.TextLLM)
+		}
+
+		for _, c := range s.Couplings {
+			fmt.Printf("    gekoppelt: %s ↔ %s (r = %+.2f, Versatz %d)\n",
+				c.From, c.To, c.Correlation, c.Lag)
+		}
+
+		fmt.Println()
+	}
+
+	assigned := len(report.StrandMoves())
+	fmt.Printf("%d von %d Zügen sind einem Strang zugeordnet.\n\n",
+		assigned, len(report.Moves))
+}
+
+// gameFromImage lässt ein PNG durch den Erkenner laufen (Stufen 1–2) und
+// liefert die Stellung als analysierbare Partie ohne Zughistorie.
+func gameFromImage(path string, size int, komi *float64) (*board.Game, error) {
+	data, err := os.ReadFile(path)
+
+	if err != nil {
+		return nil, err
+	}
+
+	opt := vision.Options{Size: size}
+
+	if komi != nil && !math.IsNaN(*komi) {
+		opt.Komi = komi
+	}
+
+	fmt.Fprintf(os.Stderr, "goteach: Bilderkennung läuft (%s) ...\n", path)
+
+	pos, err := vision.Detect(context.Background(), data, opt)
+
+	if err != nil {
+		if errors.Is(err, vision.ErrNotConfigured) {
+			return nil, fmt.Errorf("%w — z. B. %s=%q setzen",
+				err, vision.EnvCommand, vision.DefaultCommand)
+		}
+
+		return nil, err
+	}
+
+	fmt.Fprintf(os.Stderr, "goteach: Brett %d×%d erkannt\n", pos.Size, pos.Size)
+
+	return pos.Game()
+}
+
+// reportPosition wertet eine Stellung ohne Zughistorie aus und druckt sie.
+func reportPosition(g *board.Game, an katago.Analyzer, opt teaching.Options,
+	jsonOut string) error {
+
+	rep, err := teaching.AnalyzePosition(g, an, opt)
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(rep.Text)
+	fmt.Println()
+	fmt.Println("Ketten")
+	fmt.Println("------")
+
+	for _, grp := range rep.Groups {
+		marks := ""
+
+		if grp.InAtari {
+			marks += " [Atari]"
+		}
+
+		if grp.UncondAlive {
+			marks += " [unbedingt lebendig]"
+		}
+
+		fmt.Printf("%-7s %-4s %2d Steine, %2d Freiheiten, Stärke %+.2f%s\n",
+			grp.Color, grp.Rep, grp.Stones, grp.Liberties, grp.Strength, marks)
+	}
+
+	if jsonOut != "" {
+		buf, err := json.MarshalIndent(rep, "", "  ")
+
+		if err != nil {
+			return err
+		}
+
+		if err := os.WriteFile(jsonOut, buf, 0o644); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "goteach: JSON-Report → %s\n", jsonOut)
+	}
 
 	return nil
 }

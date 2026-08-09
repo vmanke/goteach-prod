@@ -4,3 +4,13 @@ analysis_logs/
 *.log
 !demo/*.log
 /report.json
+
+# Python-Teilprojekt (vision/python)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+/vision/python/build/
+/vision/python/dist/
+*.onnx
+*.pt

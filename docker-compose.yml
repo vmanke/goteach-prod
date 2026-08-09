@@ -6,6 +6,11 @@ services:
       # Für CPUs ohne AVX2 einkommentieren:
       # args:
       #   KATAGO_FLAVOR: eigen
+      # Bilderkennung (Stufen 1-2) mit ins Image nehmen:
+      # args:
+      #   WITH_VISION: "1"
+    # environment:
+    #   GOTEACH_VISION_CMD: "python3 -m goteach_vision detect -"
     ports:
       - "8080:8080"
     restart: unless-stopped

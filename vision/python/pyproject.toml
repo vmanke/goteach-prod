@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goteach-vision"
+version = "0.1.0"
+description = "Stufen 1-2 von goteach: PNG eines Go-Bretts zur symbolischen Stellung"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Basis: Erkennung ohne ML (Homographie + klassisches Backend).
+dependencies = [
+    "numpy>=1.24,<3",
+    "pillow>=10,<12",
+    "opencv-python-headless>=4.8,<6",
+]
+
+[project.optional-dependencies]
+# Inferenz mit dem U-Net; bewusst getrennt, damit die Basis leicht bleibt.
+onnx = ["onnxruntime>=1.16,<2"]
+# Training und ONNX-Export brauchen torch; zur Laufzeit nie noetig.
+# onnxscript gehoert dazu: Der Exporter von torch >= 2.6 laeuft ueber dynamo
+# und bricht ohne dieses Paket ab.
+train = ["torch>=2.1", "onnx>=1.15", "onnxscript>=0.1"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+goteach-vision = "goteach_vision.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "torch: braucht torch (Training/Export), wird sonst uebersprungen",
+    "onnx: braucht onnxruntime und ein Modell, wird sonst uebersprungen",
+]
