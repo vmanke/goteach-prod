@@ -19,6 +19,12 @@ var ErrRemote = errors.New("katago: Remote-Engine")
 // skalieren mit Visits × Stellungen und dürfen Minuten dauern.
 const remoteTimeout = 5 * time.Minute
 
+// maxRemoteReplyBytes deckelt die Antwort des Engine-Hosts. Ownership-
+// Felder sind groß (Brettpunkte × Turns), aber selbst eine volle Partie
+// bleibt weit unter diesem Limit; ein kaputter oder feindlicher Host
+// kann so keinen unbegrenzten Speicher binden.
+const maxRemoteReplyBytes = 64 << 20
+
 // Remote ist ein Analyzer, der die Analyse an einen entfernten
 // goteach-Server mit echter Engine delegiert (POST <url>/engine/analyze,
 // Bearer-Token). So bekommt eine Instanz ohne KataGo-Binary — etwa auf
@@ -97,7 +103,9 @@ func (rm *Remote) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
 
 	var reply remoteReply
 
-	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+	limited := io.LimitReader(resp.Body, maxRemoteReplyBytes)
+
+	if err := json.NewDecoder(limited).Decode(&reply); err != nil {
 		return nil, fmt.Errorf("%w: Antwort unlesbar: %v", ErrRemote, err)
 	}
 

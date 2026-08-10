@@ -70,6 +70,10 @@ func Run() error {
 		return fmt.Errorf("Auth: %w", err)
 	}
 
+	if err := validateRemoteEnv(); err != nil {
+		return fmt.Errorf("Remote-Engine: %w", err)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           Handler(),
@@ -137,6 +141,18 @@ func katagoRemoteConfigured() bool {
 // engineAvailable meldet, ob es irgendeinen Weg zu echten Analysen gibt.
 func engineAvailable() bool {
 	return katagoConfigured() || katagoRemoteConfigured()
+}
+
+// validateRemoteEnv prüft die Remote-Konfiguration beim Serverstart.
+// Eine URL ohne Token liefe sonst deterministisch in 401→502 beim
+// Engine-Host — schwer zu diagnostizieren; der Passthrough verlangt
+// immer ein Token.
+func validateRemoteEnv() error {
+	if katagoRemoteConfigured() && os.Getenv("KATAGO_REMOTE_TOKEN") == "" {
+		return errors.New("KATAGO_REMOTE_TOKEN fehlt (KATAGO_REMOTE_URL ist gesetzt)")
+	}
+
+	return nil
 }
 
 // handleInfo liefert die Dienstinfo als JSON (GET /api).
@@ -327,6 +343,12 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 // Antwort trägt dann "synthetic": true.
 func startAnalyzer() (katago.Analyzer, bool, error) {
 	if !katagoConfigured() && katagoRemoteConfigured() {
+		// Doppelter Boden zum Start-Check in Run: auch eingebettete Nutzung
+		// des Handlers scheitert mit klarer Ursache statt 401→502.
+		if err := validateRemoteEnv(); err != nil {
+			return nil, false, err
+		}
+
 		// synthetic entscheidet der Engine-Host; handleAnalyze übernimmt
 		// dessen Flag nach der Analyse aus katago.Remote.
 		return katago.NewRemote(os.Getenv("KATAGO_REMOTE_URL"),

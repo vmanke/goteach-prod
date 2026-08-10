@@ -11,6 +11,7 @@ package server
 
 import (
 	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"log"
@@ -27,6 +28,16 @@ const maxEngineBytes = 2 << 20
 // maxEngineTurns deckelt die Zahl der Stellungen pro Anfrage; reale
 // Partien haben unter 1000 Züge.
 const maxEngineTurns = 2048
+
+// tokenEqual vergleicht Tokens über ihre SHA-256-Digests: hmac.Equal
+// bricht bei ungleicher Länge sofort ab, die Digests sind immer gleich
+// lang — so verrät auch die Token-Länge keinen Timing-Unterschied.
+func tokenEqual(a, b string) bool {
+	da := sha256.Sum256([]byte(a))
+	db := sha256.Sum256([]byte(b))
+
+	return hmac.Equal(da[:], db[:])
+}
 
 // engineQuery ist der Request-Body von POST /engine/analyze
 // (Gegenstück zu katago.Remote).
@@ -61,7 +72,7 @@ func handleEngineAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	got, ok := bearerToken(r)
 
-	if !ok || !hmac.Equal([]byte(got), []byte(token)) {
+	if !ok || !tokenEqual(got, token) {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 		httpError(w, http.StatusUnauthorized, "Engine-Token falsch oder fehlt")
 

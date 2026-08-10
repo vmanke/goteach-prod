@@ -80,9 +80,17 @@ func validateAuthEnv() error {
 		return err
 	}
 
-	_, err := tokenTTL()
+	if _, err := tokenTTL(); err != nil {
+		return err
+	}
 
-	return err
+	// Dummy-Hash vorwärmen: sonst wäre der allererste Login-Versuch mit
+	// unbekanntem Namen nach Prozessstart messbar langsamer (Erzeugung
+	// zusätzlich zur Prüfung) — genau das Timing-Signal, das der Dummy
+	// verhindern soll.
+	_ = dummyHash()
+
+	return nil
 }
 
 // warnAuthDisabled loggt genau einmal, dass der Dienst offen läuft.

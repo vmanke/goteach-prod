@@ -804,6 +804,25 @@ func TestAnalyzeViaRemoteEngine(t *testing.T) {
 	}
 }
 
+// KATAGO_REMOTE_URL ohne KATAGO_REMOTE_TOKEN ist Fehlkonfiguration und
+// scheitert mit klarer Ursache statt eines 401→502 beim Engine-Host.
+func TestAnalyzeRemoteURLWithoutToken(t *testing.T) {
+	env := map[string]string{"KATAGO_REMOTE_URL": "http://localhost:9"}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	rr := serveEnv(t, req, env)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("Status = %d, erwartet 502", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), "KATAGO_REMOTE_TOKEN") {
+		t.Errorf("Fehlermeldung nennt die Ursache nicht: %s", rr.Body.String())
+	}
+}
+
 // Remote-Fehler sind Gateway-Fehler (502), keine internen Fehler.
 func TestAnalyzeRemoteEngineDown(t *testing.T) {
 	env := map[string]string{
