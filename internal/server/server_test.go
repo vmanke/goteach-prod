@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -925,3 +926,72 @@ func TestCORSPreflight(t *testing.T) {
 		t.Errorf("Allow-Methods = %q, POST fehlt", got)
 	}
 }
+
+// Lange Rechnungen halten die Verbindung offen: nach dem Intervall geht
+// Status 200 samt Füllzeichen hinaus, das Ergebnis kommt danach trotzdem
+// vollständig an.
+func TestComputeKeepingAliveHeartbeat(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	resp, _, started, err := computeKeepingAlive(rr, 5*time.Millisecond, "\n",
+		func() (analyzeResponse, int, error) {
+			time.Sleep(50 * time.Millisecond)
+
+			return analyzeResponse{Size: 19}, http.StatusOK, nil
+		})
+
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+
+	if !started {
+		t.Fatal("Heartbeat hat die Antwort nicht begonnen")
+	}
+
+	if resp.Size != 19 {
+		t.Fatalf("Size = %d, erwartet 19", resp.Size)
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, erwartet 200", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), "\n") {
+		t.Fatal("kein Füllzeichen im Body")
+	}
+
+	if !rr.Flushed {
+		t.Fatal("Füllzeichen wurden nicht geflusht")
+	}
+}
+
+// Schnelle Ergebnisse — auch schnelle Fehler — bleiben unangetastet:
+// nichts gesendet, der Statuscode aus compute steht dem Aufrufer noch
+// als echter HTTP-Status zur Verfügung.
+func TestComputeKeepingAliveFastPathWritesNothing(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	_, status, started, err := computeKeepingAlive(rr, time.Hour, "\n",
+		func() (analyzeResponse, int, error) {
+			return analyzeResponse{}, http.StatusBadGateway,
+				errComputeFailed
+		})
+
+	if err == nil {
+		t.Fatal("Fehler aus compute ging verloren")
+	}
+
+	if started {
+		t.Fatal("Fast-Path hat die Antwort begonnen")
+	}
+
+	if status != http.StatusBadGateway {
+		t.Fatalf("status = %d, erwartet 502", status)
+	}
+
+	if rr.Body.Len() != 0 {
+		t.Fatal("Fast-Path hat Bytes geschrieben")
+	}
+}
+
+var errComputeFailed = errors.New("kaputt")

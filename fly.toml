@@ -18,8 +18,9 @@
 #   Maschinengröße unten (4 Performance-Kerne) ist dafür das sinnvolle
 #   Minimum; kleiner wird es zäh, größer wird es besser.
 # * Der Fly-Proxy trennt Verbindungen, auf denen länger nichts ankommt.
-#   KataGo antwortet erst am Ende — lange Partien deshalb mit moderaten
-#   visits (Query-Parameter) oder in Zugbereichen (from/to) analysieren.
+#   /analyze hält sie deshalb mit Heartbeat-Füllbytes offen (siehe
+#   keepAliveInterval in internal/server). Lange Partien dauern trotzdem
+#   lange — moderate visits oder Zugbereiche (from/to) bleiben sinnvoll.
 # * auto_stop/auto_start: die Maschine schläft ohne Verkehr und kostet
 #   dann nichts; die erste Anfrage weckt sie (ein paar Sekunden Kaltstart,
 #   zusätzlich zur Analysezeit).
@@ -49,10 +50,13 @@ primary_region = "fra"
     hard_limit = 2
     soft_limit = 1
 
+  # grace_period großzügig: flyctl wartet beim Deploy auf genau diesen
+  # Check, und eine schlafend aktualisierte Maschine braucht einen Moment
+  # — ein knapper Wert lässt Deploys rot aussehen, die in Ordnung sind.
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
-    grace_period = "15s"
+    grace_period = "30s"
     method = "GET"
     path = "/healthz"
 
