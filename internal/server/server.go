@@ -91,7 +91,57 @@ func Handler() http.Handler {
 	mux.HandleFunc("/style.css", handleAsset("style.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("/favicon.svg", handleAsset("favicon.svg", "image/svg+xml"))
 
-	return withRecover(mux)
+	return withRecover(withCORS(mux))
+}
+
+// corsOrigins liest die erlaubten Cross-Origin-Absender aus
+// GOTEACH_CORS_ORIGINS (kommagetrennt). Ohne Umgebung gilt die
+// Vereinshomepage, die den Dienst aus dem Browser aufruft.
+func corsOrigins() map[string]bool {
+	raw := os.Getenv("GOTEACH_CORS_ORIGINS")
+
+	if raw == "" {
+		raw = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de"
+	}
+
+	out := map[string]bool{}
+
+	for _, origin := range strings.Split(raw, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			out[origin] = true
+		}
+	}
+
+	return out
+}
+
+// withCORS beantwortet Cross-Origin-Aufrufe der erlaubten Absender.
+// Nur gelistete Origins werden gespiegelt — kein Wildcard: der Dienst
+// soll aus fremden Seiten heraus nicht still mitbenutzt werden. Vary
+// verhindert, dass ein Cache die Origin-abhängige Antwort vermischt.
+func withCORS(next http.Handler) http.Handler {
+	allowed := corsOrigins()
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && allowed[origin] {
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", origin)
+			h.Add("Vary", "Origin")
+
+			// Preflight endet hier: der Browser fragt nach, ob POST mit
+			// Content-Type erlaubt ist, und braucht dafür keinen Body.
+			if r.Method == http.MethodOptions {
+				h.Set("Access-Control-Allow-Methods", "GET, POST")
+				h.Set("Access-Control-Allow-Headers", "Content-Type")
+				h.Set("Access-Control-Max-Age", "86400")
+				w.WriteHeader(http.StatusNoContent)
+
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withRecover fängt Handler-Panics ab und antwortet mit 500-JSON statt
@@ -268,6 +318,26 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		effRules = opt.Rules
 	}
 
+	resp := analyzeResponse{
+		Size:      game.Size,
+		Komi:      effKomi,
+		Rules:     effRules,
+		Moves:     len(game.Moves),
+		Synthetic: synthetic,
+		Strands:   report.Strands,
+		Reports:   report.Moves,
+	}
+
+	// Kompaktformat für Clients ohne JSON-Parser (die Vereinshomepage
+	// rendert im wasm-Client): ein Datensatz je Zug, Felder mit US (0x1f),
+	// Datensätze mit RS (0x1e) getrennt — dieselbe Codec-Idee, die der
+	// Client auch für seine eigenen Inseln verwendet.
+	if strings.EqualFold(get("format"), "lines") {
+		writeLines(w, resp)
+
+		return
+	}
+
 	if wantsDownload(get) {
 		w.Header().Set("Content-Disposition",
 			`attachment; filename="goteach-report.json"`)
@@ -282,6 +352,78 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		Strands:   report.Strands,
 		Reports:   report.Moves,
 	})
+}
+
+// Trennzeichen des Kompaktformats: US zwischen Feldern, RS zwischen
+// Datensätzen — Steuerzeichen, die in Prosa nicht vorkommen und vom
+// Feld-Reiniger ohnehin entfernt würden.
+const (
+	linesFieldSep  = "\x1f"
+	linesRecordSep = "\x1e"
+)
+
+// writeLines schreibt die Analyse als Kompaktformat: ein Kopfsatz
+// H|size|komi|rules|moves|synthetic, dann je Zug ein Satz
+// M|number|player|coord|category|pointsLost|winrateBefore|winrateAfter|bestMove|text.
+// Zahlen mit fester Präzision, Text von Steuerzeichen befreit — der
+// Client darf splitten statt parsen.
+func writeLines(w http.ResponseWriter, resp analyzeResponse) {
+	clean := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if r == '\n' || r == '\t' {
+				return ' '
+			}
+
+			if r < 0x20 || r == 0x7f {
+				return -1
+			}
+
+			return r
+		}, s)
+	}
+
+	record := func(fields ...string) string {
+		for i, f := range fields {
+			fields[i] = clean(f)
+		}
+
+		return strings.Join(fields, linesFieldSep)
+	}
+
+	records := []string{record(
+		"H",
+		strconv.Itoa(resp.Size),
+		strconv.FormatFloat(resp.Komi, 'f', -1, 64),
+		resp.Rules,
+		strconv.Itoa(resp.Moves),
+		strconv.FormatBool(resp.Synthetic),
+	)}
+
+	for i := range resp.Reports {
+		m := &resp.Reports[i]
+		coord := m.Coord
+
+		if m.Pass {
+			coord = "pass"
+		}
+
+		records = append(records, record(
+			"M",
+			strconv.Itoa(m.Number),
+			m.Player,
+			coord,
+			m.Category,
+			strconv.FormatFloat(m.PointsLost, 'f', 1, 64),
+			strconv.FormatFloat(m.WinrateBefore, 'f', 3, 64),
+			strconv.FormatFloat(m.WinrateAfter, 'f', 3, 64),
+			m.BestMove,
+			m.Text,
+		))
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, strings.Join(records, linesRecordSep))
 }
 
 // startAnalyzer liefert die Engine dieser Instanz. Ohne konfigurierte
