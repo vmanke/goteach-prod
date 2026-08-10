@@ -16,12 +16,14 @@ und einem faktenbasierten Merksatz.
 | `board`            | Brett, Züge, Schlagen, Selbstmord-/Ko-Verbot, Zobrist-Hash, SGF, Koordinaten |
 | `groups`           | Ketten mit Freiheiten; Bensons unbedingtes Leben (1976) als exakter Cross-Check |
 | `strength`         | Situative Gruppenstärke je Kette und als Feld über alle Punkte (exp(−d/τ)) |
-| `katago`           | Client der KataGo Analysis Engine (JSON/stdin-stdout) + Mock für Tests |
+| `katago`           | Client der KataGo Analysis Engine (JSON/stdin-stdout) + Mock für Tests + Remote-Client (`/engine/analyze`) |
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
 | `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Schnapp  |
+| `internal/auth`    | PBKDF2-HMAC-SHA256 und JWT HS256 (stdlib-only)                         |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
-| `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration)          |
+| `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration, JWT-Login, Engine-Passthrough) |
 | `cmd/goteach`      | CLI                                                                     |
+| `cmd/passhash`     | Passwort-Hashes für `AUTH_USERS` erzeugen                              |
 
 ## Build & Tests
 
@@ -97,7 +99,9 @@ PORT=8080 ./goteach-server
 | `GET /`         | Startseite: HTML für Browser (Accept: text/html), sonst Dienstinfo als JSON |
 | `GET /api`      | Dienstinfo (JSON)                                           |
 | `GET /healthz`  | Liveness-Check                                              |
-| `POST /analyze` | SGF → Teaching-Reports als JSON                             |
+| `POST /login`   | Zugangsdaten → JWT (nur bei aktiver Auth, sonst 404)        |
+| `POST /analyze` | SGF → Teaching-Reports als JSON (bei aktiver Auth: `Authorization: Bearer <Token>`) |
+| `POST /engine/analyze` | Engine-Passthrough für Remote-Instanzen (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
 | `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
 | `GET /app.js`, `GET /style.css`, `GET /favicon.svg` | eingebettete Assets     |
 
@@ -126,8 +130,86 @@ als klassischer Multipart-POST nutzbar.
 
 Engine-Wahl über Umgebung: Sind `KATAGO_PATH` und `KATAGO_MODEL` gesetzt
 (optional `KATAGO_CONFIG`, Default `analysis.cfg`), startet pro Anfrage
-eine echte Engine. Andernfalls antwortet der Mock — die Antwort trägt
-dann `"synthetic": true` und die Werte sind **keine echte Analyse**.
+eine echte Engine. Ohne lokale Binary delegiert `KATAGO_REMOTE_URL` die
+Analyse an einen entfernten Engine-Host (siehe „Remote-Engine“).
+Andernfalls antwortet der Mock — die Antwort trägt dann
+`"synthetic": true` und die Werte sind **keine echte Analyse**.
+
+### Authentifizierung (JWT)
+
+Standardmäßig läuft der Dienst offen. Sobald `AUTH_USERS` gesetzt ist,
+verlangt `POST /analyze` ein JWT; alle anderen Routen (Startseite,
+Dienstinfo, Healthcheck, Assets) bleiben öffentlich. Es gibt bewusst
+keine Registrierung, keinen Passwort-Reset und keine Datenbank — die
+Benutzer stehen als `name:hash`-Paare in der Umgebung, komplett
+stdlib-implementiert (PBKDF2-HMAC-SHA256 + JWT HS256).
+
+| Variable          | Bedeutung                                              |
+|-------------------|--------------------------------------------------------|
+| `AUTH_USERS`      | `alice:pbkdf2-sha256$…,bob:pbkdf2-sha256$…` (kommagetrennt) |
+| `AUTH_JWT_SECRET` | HMAC-Secret der Tokens; **Pflicht** sobald `AUTH_USERS` gesetzt ist (sonst startet der Server nicht) |
+| `AUTH_TOKEN_TTL`  | Token-Lebensdauer, `time.ParseDuration`-Syntax (Default `24h`) |
+
+Hash erzeugen und einloggen:
+
+```bash
+echo -n 'geheim' | go run ./cmd/passhash            # → pbkdf2-sha256$600000$…$…
+export AUTH_USERS="alice:$(echo -n 'geheim' | go run ./cmd/passhash)"
+export AUTH_JWT_SECRET="$(head -c 32 /dev/urandom | base64)"
+
+TOKEN=$(curl -s -X POST localhost:8080/login \
+  -d '{"username":"alice","password":"geheim"}' | sed -n 's/.*"token": "\([^"]*\)".*/\1/p')
+curl -X POST --data-binary @partie.sgf \
+  -H "Authorization: Bearer $TOKEN" localhost:8080/analyze
+```
+
+Details: `POST /login` nimmt JSON `{"username":…,"password":…}` (max.
+4 KiB) und antwortet mit `{"token":…,"tokenType":"Bearer","expiresAt":…}`.
+Falscher Name und falsches Passwort ergeben dieselbe 401-Antwort (kein
+User-Enumeration; unbekannte Namen kosten per Dummy-Hash gleich viel
+Zeit). Tokens sind HS256-signiert (`alg` gepinnt, `none` abgelehnt),
+laufen nach `AUTH_TOKEN_TTL` ab (30 s Toleranz für Uhrenversatz) und
+werden in konstanter Zeit verglichen. Zusätzlich zur Signatur prüft
+jede Anfrage, ob der Benutzer aus dem Token noch in `AUTH_USERS` steht —
+einen Eintrag entfernen sperrt also sofort aus, nicht erst beim
+Token-Ablauf (Passwort-Änderung bei gleichem Namen lässt bestehende
+Tokens dagegen bis `exp` gültig; wer das braucht, rotiert
+`AUTH_JWT_SECRET` und loggt damit alle aus). Die Startseite zeigt bei aktiver
+Auth ein Login-Formular; das Token lebt nur im `sessionStorage` des
+Tabs. Ein Rate-Limit auf `/login` gibt es bewusst nicht (der Dienst ist
+zustandslos); die PBKDF2-Kosten bremsen Brute-Force serverseitig.
+Hinweis: Das No-JS-Formular funktioniert bei aktiver Auth nicht — der
+Multipart-POST kann keinen Bearer-Header setzen und erhält 401.
+
+### Remote-Engine: echte Analysen auf Vercel
+
+Vercel kann kein KataGo-Binary ausführen (Größen-/Zeitlimits, keine
+GPU) — dort lief bisher nur der Mock. Die Lösung ist Arbeitsteilung
+über zwei Instanzen desselben Servers:
+
+1. **Engine-Host** (Docker-Image auf VPS, Fly.io, Railway …): hat die
+   echte Engine und schaltet mit `KATAGO_ENGINE_TOKEN` den Passthrough
+   `POST /engine/analyze` frei. Ohne die Variable existiert die Route
+   nicht (404). Der Endpunkt verlangt das Token als `Authorization:
+   Bearer` (Vergleich in konstanter Zeit), deckelt `maxVisits` erneut
+   und nutzt ausschließlich die lokale Engine — nie selbst eine
+   Remote-Engine, damit sich zwei Instanzen nicht endlos gegenseitig
+   weiterreichen.
+2. **Vercel-Instanz**: `KATAGO_REMOTE_URL` (Basis-URL des Hosts) und
+   `KATAGO_REMOTE_TOKEN` (gleicher Wert wie `KATAGO_ENGINE_TOKEN`)
+   setzen — weiterhin **keine** `KATAGO_PATH`/`KATAGO_MODEL`. Jede
+   Analyse läuft dann über den Host; `"synthetic"` in der Antwort
+   meldet, ob dort wirklich eine Engine gerechnet hat (antwortet der
+   Host selbst mit dem Mock, bleibt das Flag `true`). Fehler des Hosts
+   erscheinen als `502 Bad Gateway`.
+
+Wire-Format des Passthrough (JSON): Request
+`{"request":{"initialStones":…,"moves":…,"rules":…,"komi":…,"size":…,"maxVisits":…},"turns":[…]}`,
+Antwort `{"synthetic":…,"results":[…]}` mit den rohen
+KataGo-Ergebnissen pro Turn. Der Remote-Client (`katago.Remote`) hat
+5 Minuten Timeout pro Analyse; auf Vercel begrenzt zusätzlich das
+Funktions-Zeitlimit die Antwortzeit — `visits` dort moderat wählen
+(Analysen skalieren mit Visits × Stellungen).
 
 ### Docker: echte KataGo-Engine
 
@@ -162,8 +244,9 @@ Hinweise:
 - **CPU ohne AVX2:** mit `--build-arg KATAGO_FLAVOR=eigen` bauen. Die
   Release-Binaries sind x64; auf ARM (z. B. Apple Silicon) KataGo selbst
   kompilieren oder auf einem x64-Host deployen.
-- **Arbeitsteilung:** Vercel bleibt Frontend/Demo (Mock), der
-  Docker-Host (VPS, Fly.io, Railway …) liefert die echte Analyse.
+- **Arbeitsteilung:** der Docker-Host (VPS, Fly.io, Railway …) liefert
+  die echte Analyse; Vercel nutzt ihn per `KATAGO_REMOTE_URL` als
+  Remote-Engine (siehe „Remote-Engine“) oder bleibt ohne sie Demo (Mock).
 
 ### Vercel-Deployment
 
@@ -181,10 +264,14 @@ beides — das überstimmt die Projekteinstellungen bei jedem Deployment:
   die sofort mit der Flag-Usage endet (genau dieses Fehlerbild gab es).
 
 Im Vercel-Dashboard sollten Install-/Build-Command-Overrides trotzdem
-**aus** sein und keine `KATAGO_*`-Variablen gesetzt werden (Functions
-haben keine Engine; ohne die Variablen antwortet der Mock). Der Server
-lauscht auf dem `PORT` aus der Umgebung; das Root Directory des Projekts
-muss auf die Repo-Wurzel zeigen.
+**aus** sein und niemals `KATAGO_PATH`/`KATAGO_MODEL` gesetzt werden
+(Functions haben keine Engine-Binary). Für echte Analysen stattdessen
+`KATAGO_REMOTE_URL` und `KATAGO_REMOTE_TOKEN` auf den Engine-Host
+zeigen lassen (siehe „Remote-Engine“); ohne beides antwortet der Mock.
+Für den JWT-Schutz `AUTH_USERS` und `AUTH_JWT_SECRET` als
+Environment-Variablen eintragen. Der Server lauscht auf dem `PORT` aus
+der Umgebung; das Root Directory des Projekts muss auf die Repo-Wurzel
+zeigen.
 
 ## LLM-Feinschliff (optional)
 
@@ -394,7 +481,12 @@ und Ko-Verbot, SGF-Parsing inkl. Nachspielen, GTP-Roundtrip, Benson
 (Zwei-Augen lebendig / Ein-Auge nicht), Stärkemaß-Grenzwerte und
 τ-Lokalität, Teaching end-to-end (Mock) inkl. Bereichsauswahl `-from/-to`
 sowie die Eingabewege des HTTP-Dienstes (roher Body, Formularfeld,
-Datei-Upload, OGS).
+Datei-Upload, OGS). Für Auth und Remote-Engine zusätzlich: PBKDF2 gegen
+publizierte Testvektoren, JWT-Roundtrip inkl. Ablauf/Manipulation/
+`alg:none`, Login-Flows (Erfolg, einheitliche 401, Fehlkonfiguration
+fail-closed), der Engine-Passthrough (Token, Limits, 404 ohne
+Konfiguration) und ein Zwei-Instanzen-Test, bei dem eine Instanz die
+Analyse per `KATAGO_REMOTE_URL` an die andere delegiert.
 
 Für die Erzählstränge zusätzlich: der Stärketensor gegen das bestehende
 Kettenmaß verankert (für eine Einzelquelle müssen beide denselben Wert

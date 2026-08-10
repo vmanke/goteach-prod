@@ -10,21 +10,51 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/vmanke/goteach-prod/internal/auth"
 )
 
 const demoSGF = "(;GM[1]FF[4]SZ[19]KM[7.5]RU[Chinese]" +
 	";B[pd];W[dp];B[pq];W[dd];B[qk];W[nc];B[pf];W[jd];B[cf];W[ch])"
 
-// serve schickt den Request durch den kompletten Router (inkl. Recovery).
-func serve(t *testing.T, req *http.Request) *httptest.ResponseRecorder {
+// serveEnv schickt den Request durch den kompletten Router (inkl.
+// Recovery). Engine-, Remote- und Auth-Umgebung werden neutralisiert;
+// env überschreibt gezielt einzelne Variablen.
+func serveEnv(t *testing.T, req *http.Request,
+	env map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
-	t.Setenv("KATAGO_PATH", "")
-	t.Setenv("KATAGO_MODEL", "")
+
+	base := map[string]string{
+		"KATAGO_PATH":         "",
+		"KATAGO_MODEL":        "",
+		"KATAGO_REMOTE_URL":   "",
+		"KATAGO_REMOTE_TOKEN": "",
+		"KATAGO_ENGINE_TOKEN": "",
+		"AUTH_USERS":          "",
+		"AUTH_JWT_SECRET":     "",
+		"AUTH_TOKEN_TTL":      "",
+	}
+
+	for k, v := range env {
+		base[k] = v
+	}
+
+	for k, v := range base {
+		t.Setenv(k, v)
+	}
 
 	rr := httptest.NewRecorder()
 	Handler().ServeHTTP(rr, req)
 
 	return rr
+}
+
+// serve ist serveEnv ohne Überschreibungen: offener Dienst, Mock-Engine.
+func serve(t *testing.T, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return serveEnv(t, req, nil)
 }
 
 func TestHomeHTMLForBrowsers(t *testing.T) {
@@ -452,5 +482,358 @@ func TestHealthz(t *testing.T) {
 
 	if rr.Code != http.StatusOK || rr.Body.String() != "ok\n" {
 		t.Fatalf("healthz: Status = %d, Body = %q", rr.Code, rr.Body.String())
+	}
+}
+
+// testUserHash ist der Hash von "geheim" mit bewusst wenigen Iterationen
+// (1000), damit die Tests schnell bleiben.
+const testUserHash = "pbkdf2-sha256$1000$zkno905x1hUwGSVbn4Wh3Q$" +
+	"7AfR3P7tExD8D8EGAiypD2tie_z7cXyX3vGxu_NTsfs"
+
+// authEnv liefert die Umgebung einer Instanz mit aktivem Login.
+func authEnv() map[string]string {
+	return map[string]string{
+		"AUTH_USERS":      "alice:" + testUserHash,
+		"AUTH_JWT_SECRET": "test-secret",
+	}
+}
+
+func loginBody(username, password string) *strings.Reader {
+	body, _ := json.Marshal(map[string]string{
+		"username": username, "password": password,
+	})
+
+	return strings.NewReader(string(body))
+}
+
+func TestLoginIssuesToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/login",
+		loginBody("alice", "geheim"))
+
+	rr := serveEnv(t, req, authEnv())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Token     string `json:"token"`
+		TokenType string `json:"tokenType"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Antwort kein JSON: %v", err)
+	}
+
+	if resp.Token == "" || resp.TokenType != "Bearer" || resp.ExpiresAt == "" {
+		t.Errorf("Login-Antwort unvollständig: %+v", resp)
+	}
+
+	if _, err := auth.VerifyHS256([]byte("test-secret"),
+		resp.Token, time.Now()); err != nil {
+		t.Errorf("ausgestelltes Token ungültig: %v", err)
+	}
+}
+
+func TestLoginRejectsBadCredentials(t *testing.T) {
+	cases := map[string][2]string{
+		"falsches Passwort": {"alice", "falsch"},
+		"unbekannter User":  {"mallory", "geheim"},
+	}
+
+	for name, c := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/login",
+			loginBody(c[0], c[1]))
+
+		rr := serveEnv(t, req, authEnv())
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("%s: Status = %d, erwartet 401", name, rr.Code)
+		}
+
+		// Einheitliche Fehlermeldung: kein User-Enumeration.
+		if !strings.Contains(rr.Body.String(),
+			"Benutzername oder Passwort falsch") {
+			t.Errorf("%s: uneinheitliche Fehlermeldung: %s", name, rr.Body.String())
+		}
+	}
+}
+
+func TestLoginBadRequests(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("kein json"))
+
+	if rr := serveEnv(t, req, authEnv()); rr.Code != http.StatusBadRequest {
+		t.Errorf("kaputtes JSON: Status = %d, erwartet 400", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/login", nil)
+
+	if rr := serveEnv(t, req, authEnv()); rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: Status = %d, erwartet 405", rr.Code)
+	}
+}
+
+func TestLoginWithoutAuthConfigured(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/login",
+		loginBody("alice", "geheim"))
+
+	if rr := serve(t, req); rr.Code != http.StatusNotFound {
+		t.Fatalf("Status = %d, erwartet 404", rr.Code)
+	}
+}
+
+// AUTH_USERS ohne AUTH_JWT_SECRET ist Fehlkonfiguration: fail closed.
+func TestAuthMisconfigured(t *testing.T) {
+	env := map[string]string{"AUTH_USERS": "alice:" + testUserHash}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	if rr := serveEnv(t, req, env); rr.Code != http.StatusInternalServerError {
+		t.Errorf("/analyze: Status = %d, erwartet 500", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/login",
+		loginBody("alice", "geheim"))
+
+	if rr := serveEnv(t, req, env); rr.Code != http.StatusInternalServerError {
+		t.Errorf("/login: Status = %d, erwartet 500", rr.Code)
+	}
+}
+
+func TestAnalyzeRequiresAuth(t *testing.T) {
+	// Ohne Token: 401 mit WWW-Authenticate.
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	rr := serveEnv(t, req, authEnv())
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("ohne Token: Status = %d, erwartet 401", rr.Code)
+	}
+
+	if rr.Header().Get("WWW-Authenticate") != "Bearer" {
+		t.Errorf("WWW-Authenticate = %q, erwartet Bearer",
+			rr.Header().Get("WWW-Authenticate"))
+	}
+
+	// Mit frischem Token aus /login: 200.
+	loginReq := httptest.NewRequest(http.MethodPost, "/login",
+		loginBody("alice", "geheim"))
+	loginRR := serveEnv(t, loginReq, authEnv())
+
+	var login struct {
+		Token string `json:"token"`
+	}
+
+	if err := json.Unmarshal(loginRR.Body.Bytes(), &login); err != nil ||
+		login.Token == "" {
+		t.Fatalf("Login fehlgeschlagen: %s", loginRR.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Authorization", "Bearer "+login.Token)
+
+	rr = serveEnv(t, req, authEnv())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("mit Token: Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	if resp := decodeAnalyze(t, rr); resp.Moves != 10 {
+		t.Errorf("Moves = %d, erwartet 10", resp.Moves)
+	}
+}
+
+// Ein gültig signiertes Token nützt nichts mehr, sobald der Benutzer aus
+// AUTH_USERS entfernt wurde — Revocation wirkt sofort, nicht erst bei exp.
+func TestAnalyzeRejectsRemovedUser(t *testing.T) {
+	now := time.Now()
+	token := auth.SignHS256([]byte("test-secret"), auth.Claims{
+		Sub: "alice", Iss: "goteach",
+		Iat: now.Unix(), Exp: now.Add(time.Hour).Unix(),
+	})
+
+	env := map[string]string{
+		"AUTH_USERS":      "bob:" + testUserHash, // alice existiert nicht mehr
+		"AUTH_JWT_SECRET": "test-secret",
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	if rr := serveEnv(t, req, env); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Status = %d, erwartet 401", rr.Code)
+	}
+}
+
+// Ein Token mit fremdem Aussteller wird abgelehnt, auch wenn Signatur,
+// Ablauf und Benutzername stimmen.
+func TestAnalyzeRejectsForeignIssuer(t *testing.T) {
+	now := time.Now()
+	token := auth.SignHS256([]byte("test-secret"), auth.Claims{
+		Sub: "alice", Iss: "anderer-dienst",
+		Iat: now.Unix(), Exp: now.Add(time.Hour).Unix(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	if rr := serveEnv(t, req, authEnv()); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Status = %d, erwartet 401", rr.Code)
+	}
+}
+
+func TestAnalyzeRejectsExpiredToken(t *testing.T) {
+	now := time.Now()
+	expired := auth.SignHS256([]byte("test-secret"), auth.Claims{
+		Sub: "alice", Iss: "goteach",
+		Iat: now.Add(-2 * time.Hour).Unix(),
+		Exp: now.Add(-time.Hour).Unix(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Authorization", "Bearer "+expired)
+
+	if rr := serveEnv(t, req, authEnv()); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Status = %d, erwartet 401", rr.Code)
+	}
+}
+
+const engineQueryJSON = `{
+  "request": {"size": 19, "komi": 7.5, "rules": "chinese",
+    "moves": [["B","Q16"],["W","D4"]]},
+  "turns": [0, 1, 2]
+}`
+
+func TestEnginePassthrough(t *testing.T) {
+	env := map[string]string{"KATAGO_ENGINE_TOKEN": "tok"}
+
+	// Ohne Token-Env existiert die Route nach außen nicht.
+	req := httptest.NewRequest(http.MethodPost, "/engine/analyze",
+		strings.NewReader(engineQueryJSON))
+
+	if rr := serve(t, req); rr.Code != http.StatusNotFound {
+		t.Errorf("unkonfiguriert: Status = %d, erwartet 404", rr.Code)
+	}
+
+	// Falsches Token: 401.
+	req = httptest.NewRequest(http.MethodPost, "/engine/analyze",
+		strings.NewReader(engineQueryJSON))
+	req.Header.Set("Authorization", "Bearer falsch")
+
+	if rr := serveEnv(t, req, env); rr.Code != http.StatusUnauthorized {
+		t.Errorf("falsches Token: Status = %d, erwartet 401", rr.Code)
+	}
+
+	// Korrektes Token: Mock antwortet, synthetic true, ein Result pro Turn.
+	req = httptest.NewRequest(http.MethodPost, "/engine/analyze",
+		strings.NewReader(engineQueryJSON))
+	req.Header.Set("Authorization", "Bearer tok")
+
+	rr := serveEnv(t, req, env)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	var reply engineReply
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &reply); err != nil {
+		t.Fatalf("Antwort kein JSON: %v", err)
+	}
+
+	if !reply.Synthetic || len(reply.Results) != 3 {
+		t.Errorf("synthetic = %v, Results = %d, erwartet true/3",
+			reply.Synthetic, len(reply.Results))
+	}
+
+	// Kaputte Anfragen: 400.
+	for name, body := range map[string]string{
+		"kein JSON":  "quatsch",
+		"size fehlt": `{"request":{"komi":7.5},"turns":[0]}`,
+		"turns leer": `{"request":{"size":19},"turns":[]}`,
+	} {
+		req = httptest.NewRequest(http.MethodPost, "/engine/analyze",
+			strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+
+		if rr := serveEnv(t, req, env); rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: Status = %d, erwartet 400", name, rr.Code)
+		}
+	}
+}
+
+// Zwei Instanzen im selben Prozess: der Stub spielt den Docker-Host mit
+// Engine-Passthrough (lokaler Mock), die äußere Instanz delegiert per
+// KATAGO_REMOTE_URL — das synthetic-Flag des Hosts muss durchkommen.
+func TestAnalyzeViaRemoteEngine(t *testing.T) {
+	stub := httptest.NewServer(Handler())
+	defer stub.Close()
+
+	env := map[string]string{
+		"KATAGO_ENGINE_TOKEN": "tok",
+		"KATAGO_REMOTE_URL":   stub.URL,
+		"KATAGO_REMOTE_TOKEN": "tok",
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	rr := serveEnv(t, req, env)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	resp := decodeAnalyze(t, rr)
+
+	if resp.Moves != 10 || len(resp.Reports) != 10 {
+		t.Errorf("Moves = %d, Reports = %d, erwartet je 10",
+			resp.Moves, len(resp.Reports))
+	}
+
+	if !resp.Synthetic {
+		t.Error("synthetic-Flag des Engine-Hosts nicht durchgereicht")
+	}
+}
+
+// KATAGO_REMOTE_URL ohne KATAGO_REMOTE_TOKEN ist Fehlkonfiguration und
+// scheitert mit klarer Ursache statt eines 401→502 beim Engine-Host.
+func TestAnalyzeRemoteURLWithoutToken(t *testing.T) {
+	env := map[string]string{"KATAGO_REMOTE_URL": "http://localhost:9"}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	rr := serveEnv(t, req, env)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("Status = %d, erwartet 502", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), "KATAGO_REMOTE_TOKEN") {
+		t.Errorf("Fehlermeldung nennt die Ursache nicht: %s", rr.Body.String())
+	}
+}
+
+// Remote-Fehler sind Gateway-Fehler (502), keine internen Fehler.
+func TestAnalyzeRemoteEngineDown(t *testing.T) {
+	env := map[string]string{
+		"KATAGO_REMOTE_URL":   "http://127.0.0.1:1",
+		"KATAGO_REMOTE_TOKEN": "tok",
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	if rr := serveEnv(t, req, env); rr.Code != http.StatusBadGateway {
+		t.Fatalf("Status = %d, erwartet 502", rr.Code)
 	}
 }
