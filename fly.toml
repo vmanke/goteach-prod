@@ -35,6 +35,10 @@ primary_region = "fra"
 
 [env]
   PORT = "8080"
+  # Browser-Absender, die /analyze und /login aufrufen dürfen. Keine
+  # Geheimnisse — öffentliche Origins, darum hier versioniert statt als
+  # Secret: die Vereinsseite unter ihrer Domain und unter Vercel.
+  GOTEACH_CORS_ORIGINS = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de,https://flaleer-berlin.vercel.app"
 
 [http_service]
   internal_port = 8080
