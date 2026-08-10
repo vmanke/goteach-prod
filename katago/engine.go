@@ -16,10 +16,12 @@ package katago
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -107,10 +109,49 @@ type Engine struct {
 	nextID atomic.Uint64
 }
 
-// Start startet `katago analysis -model <model> -config <config>`.
-func Start(katagoPath, modelPath, configPath string) (*Engine, error) {
-	cmd := exec.Command(katagoPath, "analysis",
-		"-model", modelPath, "-config", configPath)
+// engineArgs baut die Argumentliste für `katago analysis`. overrides ist
+// eine kommagetrennte Liste "schlüssel=wert,…" und wird als
+// -override-config an KataGo durchgereicht (offiziell unterstützt) —
+// so lässt sich z. B. die Thread-Zahl per Umgebung ohne Rebuild an die
+// Hardware anpassen. Einträge ohne "=" sind Tippfehler und werden als
+// Fehler gemeldet statt still verschluckt.
+func engineArgs(modelPath, configPath, overrides string) ([]string, error) {
+	args := []string{"analysis", "-model", modelPath, "-config", configPath}
+
+	for _, entry := range strings.Split(overrides, ",") {
+		entry = strings.TrimSpace(entry)
+
+		if entry == "" {
+			continue
+		}
+
+		key, value, ok := strings.Cut(entry, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		if !ok || key == "" || value == "" {
+			return nil, fmt.Errorf(
+				"katago: Override ohne \"schlüssel=wert\": %q", entry)
+		}
+
+		// Normalisiert weitergeben: Leerzeichen um "=" würden sonst Teil
+		// des KataGo-Schlüssels bzw. -Werts.
+		args = append(args, "-override-config", key+"="+value)
+	}
+
+	return args, nil
+}
+
+// Start startet `katago analysis -model <model> -config <config>`;
+// overrides (optional, "k=v,k=v") ergänzt -override-config-Argumente.
+func Start(katagoPath, modelPath, configPath, overrides string) (*Engine, error) {
+	args, err := engineArgs(modelPath, configPath, overrides)
+
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(katagoPath, args...)
 
 	stdin, err := cmd.StdinPipe()
 
@@ -273,11 +314,23 @@ func (e *Engine) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
 	return out, nil
 }
 
-// Close beendet die Engine.
+// Close beendet die Engine. Der Prozess wird bewusst per Kill beendet;
+// das daraus resultierende "signal: killed" von Wait ist der Normalfall
+// und kein Fehler — sonst loggt jede Anfrage eine Pseudo-Fehlerzeile.
 func (e *Engine) Close() error {
 	if e.cmd.Process != nil {
 		_ = e.cmd.Process.Kill()
 	}
 
-	return e.cmd.Wait()
+	err := e.cmd.Wait()
+
+	// ExitCode -1 = durch Signal beendet (robuster als der
+	// plattformabhängige Fehlertext "signal: killed").
+	var exit *exec.ExitError
+
+	if errors.As(err, &exit) && exit.ExitCode() == -1 {
+		return nil
+	}
+
+	return err
 }

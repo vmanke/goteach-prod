@@ -39,6 +39,9 @@ func run() error {
 		modelPath  = flag.String("model", "", "Pfad zum KataGo-Netz (.bin.gz)")
 		configPath = flag.String("config", "analysis.cfg",
 			"Analysis-Config (MUSS reportAnalysisWinratesAs = BLACK setzen)")
+		overrides = flag.String("overrides", "",
+			"Config-Overrides \"schlüssel=wert,…\" für KataGo "+
+				"(z. B. numSearchThreadsPerAnalysisThread=16)")
 		visits = flag.Int("visits", 200, "maxVisits pro Stellung (Kostenfaktor!)")
 		tau    = flag.Float64("tau", 3.0, "Abklinglänge der Gruppenstärke")
 		rules  = flag.String("rules", "", "Regelwerk-Override (chinese, japanese, ...)")
@@ -104,7 +107,7 @@ func run() error {
 			return fmt.Errorf("-model fehlt (oder -mock für die Offline-Demo nutzen)")
 		}
 
-		eng, err := katago.Start(*katagoPath, *modelPath, *configPath)
+		eng, err := katago.Start(*katagoPath, *modelPath, *configPath, *overrides)
 
 		if err != nil {
 			return err
