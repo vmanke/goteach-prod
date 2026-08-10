@@ -454,3 +454,103 @@ func TestHealthz(t *testing.T) {
 		t.Fatalf("healthz: Status = %d, Body = %q", rr.Code, rr.Body.String())
 	}
 }
+
+func TestAnalyzeBremstNachDemStossAus(t *testing.T) {
+	// Ein Lauf bindet die Engine minutenlang; ohne Begrenzung genügen ein
+	// paar Anfragen, um den Dienst lahmzulegen. Deshalb hier *ein* Handler
+	// über mehrere Anfragen — der Zustand des Begrenzers ist der Prüfpunkt.
+	t.Setenv("KATAGO_PATH", "")
+	t.Setenv("KATAGO_MODEL", "")
+
+	handler := Handler()
+
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/analyze",
+			strings.NewReader(demoSGF))
+		req.RemoteAddr = "203.0.113.9:4444"
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		return rr
+	}
+
+	for i := 0; i < 3; i++ {
+		if rr := post(); rr.Code != http.StatusOK {
+			t.Fatalf("Anfrage %d: Status %d, Body: %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := post()
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("Status %d, erwartet 429", rr.Code)
+	}
+
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("Retry-After fehlt — der Client weiß sonst nicht, wann er darf")
+	}
+
+	if !strings.Contains(rr.Body.String(), "zu viele Anfragen") {
+		t.Errorf("unerwarteter Body: %s", rr.Body.String())
+	}
+}
+
+func TestBegrenzungTrenntDieClients(t *testing.T) {
+	t.Setenv("KATAGO_PATH", "")
+	t.Setenv("KATAGO_MODEL", "")
+
+	handler := Handler()
+
+	post := func(addr string) int {
+		req := httptest.NewRequest(http.MethodPost, "/analyze",
+			strings.NewReader(demoSGF))
+		req.RemoteAddr = addr
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		return rr.Code
+	}
+
+	for i := 0; i < 4; i++ {
+		post("203.0.113.9:4444")
+	}
+
+	if code := post("198.51.100.4:4444"); code != http.StatusOK {
+		t.Fatalf("zweiter Client bekam %d — die Sperre gilt pro Client", code)
+	}
+}
+
+func TestForwardedForZaehltNurMitVertrauen(t *testing.T) {
+	// Ohne gesetztes GOTEACH_TRUST_PROXY darf ein selbstgesetzter Header die
+	// Begrenzung nicht aushebeln.
+	t.Setenv("KATAGO_PATH", "")
+	t.Setenv("KATAGO_MODEL", "")
+	t.Setenv("GOTEACH_TRUST_PROXY", "")
+
+	handler := Handler()
+
+	post := func(forwarded string) int {
+		req := httptest.NewRequest(http.MethodPost, "/analyze",
+			strings.NewReader(demoSGF))
+		req.RemoteAddr = "203.0.113.9:4444"
+		req.Header.Set("X-Forwarded-For", forwarded)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		return rr.Code
+	}
+
+	for i := 0; i < 3; i++ {
+		if code := post("10.0.0.1"); code != http.StatusOK {
+			t.Fatalf("Anfrage %d: Status %d", i+1, code)
+		}
+	}
+
+	// Neue erfundene Adresse, gleiche Peer-Adresse: muss trotzdem greifen.
+	if code := post("10.0.0.99"); code != http.StatusTooManyRequests {
+		t.Fatalf("Status %d, erwartet 429 — Header wurde geglaubt", code)
+	}
+}

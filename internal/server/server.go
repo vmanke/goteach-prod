@@ -37,6 +37,7 @@ import (
 
 	"github.com/vmanke/goteach-prod/board"
 	"github.com/vmanke/goteach-prod/internal/dotenv"
+	"github.com/vmanke/goteach-prod/internal/ratelimit"
 	"github.com/vmanke/goteach-prod/katago"
 	"github.com/vmanke/goteach-prod/teaching"
 )
@@ -79,19 +80,101 @@ func Run() error {
 }
 
 // Handler baut den Router des Dienstes; Run und die Tests teilen ihn.
+//
+// Die Begrenzer entstehen hier und nicht als Paketvariablen: Ihr Zustand
+// gehört zu *einem* Router. Als globale Variablen würden sich Tests den
+// Zustand teilen und wären von ihrer Reihenfolge abhängig.
 func Handler() http.Handler {
+	analyzeLimiter := ratelimit.New(ratelimit.Strict())
+	staticLimiter := ratelimit.New(ratelimit.Lenient())
+	analyzeSlots := make(chan struct{}, maxConcurrentAnalyses)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleHome)
 	mux.HandleFunc("/api", handleInfo)
 	mux.HandleFunc("/healthz", handleHealth)
-	mux.HandleFunc("/analyze", handleAnalyze)
+
+	// /analyze bekommt die strenge Begrenzung und dazu eine Obergrenze
+	// gleichzeitiger Läufe. Beides ist nötig: Die Begrenzung hält einen
+	// einzelnen Angreifer klein, der Schrank die Summe aller Anfragen. Eine
+	// Analyse belegt die Engine minutenlang; ohne Deckel genügen ein paar
+	// Clients mit je erlaubter Rate, um die Maschine zu füllen.
+	mux.Handle("/analyze", throttled(analyzeSlots,
+		limited(http.HandlerFunc(handleAnalyze), analyzeLimiter),
+	))
+
 	mux.HandleFunc("/robots.txt", handleRobots)
 	mux.HandleFunc("/sitemap.xml", handleSitemap)
 	mux.HandleFunc("/app.js", handleAsset("app.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("/style.css", handleAsset("style.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("/favicon.svg", handleAsset("favicon.svg", "image/svg+xml"))
 
-	return withRecover(mux)
+	// Alles Übrige ist billig, aber nicht umsonst — eine lockere Begrenzung
+	// über den ganzen Router.
+	return withRecover(limited(mux, staticLimiter))
+}
+
+// trustProxy meldet, ob X-Forwarded-For ausgewertet werden darf. Hinter
+// Vercel oder einem eigenen Reverse Proxy ist die Peer-Adresse immer der
+// Proxy; ohne Proxy wäre der Header dagegen frei erfunden und die Begrenzung
+// mit einer Zeile Header zu umgehen. Deshalb ausdrücklich einschalten.
+func trustProxy() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOTEACH_TRUST_PROXY"))) {
+	case "1", "true", "yes":
+		return true
+	}
+
+	return false
+}
+
+// limited weist Anfragen ab, die über der Rate liegen.
+func limited(next http.Handler, limiter *ratelimit.Limiter) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decision := limiter.Allow(ratelimit.Key(r, trustProxy()))
+
+		if decision.Allowed {
+			next.ServeHTTP(w, r)
+
+			return
+		}
+
+		seconds := int(decision.RetryAfter.Seconds() + 0.999)
+
+		if seconds < 1 {
+			seconds = 1
+		}
+
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		httpError(w, http.StatusTooManyRequests,
+			"zu viele Anfragen — Sperre %d (nächster Versuch in %ds)",
+			decision.Strikes, seconds)
+	})
+}
+
+// maxConcurrentAnalyses deckelt gleichzeitige Analysen. Jede startet eine
+// eigene KataGo-Engine; mehr als eine Handvoll bringt auf keiner Maschine
+// mehr Durchsatz, sondern nur Speicherdruck.
+const maxConcurrentAnalyses = 2
+
+// throttled lässt nur so viele Läufe gleichzeitig zu, wie slots fasst, und
+// weist weitere sofort ab, statt sie zu stauen: Eine Warteschlange vor einem
+// minutenlangen Lauf ist aus Sicht des Angreifers dasselbe wie kein Limit,
+// nur mit mehr belegtem Speicher.
+func throttled(slots chan struct{}, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+
+			next.ServeHTTP(w, r)
+
+		default:
+			w.Header().Set("Retry-After", "60")
+			httpError(w, http.StatusServiceUnavailable,
+				"Analyse gerade ausgelastet (%d gleichzeitige Läufe) — später erneut versuchen",
+				maxConcurrentAnalyses)
+		}
+	})
 }
 
 // withRecover fängt Handler-Panics ab und antwortet mit 500-JSON statt
