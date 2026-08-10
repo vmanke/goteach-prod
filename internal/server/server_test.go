@@ -478,7 +478,11 @@ func TestAnalyzeLinesFormat(t *testing.T) {
 
 	head := strings.Split(records[0], linesFieldSep)
 
-	if head[0] != "H" || head[1] != "19" || head[5] != "true" {
+	if len(head) != 6 {
+		t.Fatalf("Kopfsatz hat %d Felder, erwartet 6: %q", len(head), records[0])
+	}
+
+	if head[0] != "H" || head[1] != "19" || head[2] != "7.5" || head[5] != "true" {
 		t.Errorf("Kopfsatz unerwartet: %q", records[0])
 	}
 

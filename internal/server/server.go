@@ -123,10 +123,15 @@ func withCORS(next http.Handler) http.Handler {
 	allowed := corsOrigins()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Vary gilt für JEDE Antwort, nicht nur für erlaubte Absender: die
+		// Antwort hängt vom Origin-Header ab, und ein gemeinsamer Cache
+		// dürfte sonst eine Antwort ohne CORS-Header speichern und später
+		// einem erlaubten Absender ausliefern.
+		w.Header().Add("Vary", "Origin")
+
 		if origin := r.Header.Get("Origin"); origin != "" && allowed[origin] {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
-			h.Add("Vary", "Origin")
 
 			// Preflight endet hier: der Browser fragt nach, ob POST mit
 			// Content-Type erlaubt ist, und braucht dafür keinen Body.
@@ -393,7 +398,7 @@ func writeLines(w http.ResponseWriter, resp analyzeResponse) {
 	records := []string{record(
 		"H",
 		strconv.Itoa(resp.Size),
-		strconv.FormatFloat(resp.Komi, 'f', -1, 64),
+		strconv.FormatFloat(resp.Komi, 'f', 1, 64),
 		resp.Rules,
 		strconv.Itoa(resp.Moves),
 		strconv.FormatBool(resp.Synthetic),
