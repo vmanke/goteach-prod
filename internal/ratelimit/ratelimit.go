@@ -64,6 +64,20 @@ func Strict() Config {
 	}
 }
 
+// Moderate passt zu /analyze ohne echte Engine. Der Mock antwortet in
+// Millisekunden statt in Minuten; die strengen Werte wären dort eine
+// Schikane gegen normale Besucher, ohne etwas zu schützen.
+func Moderate() Config {
+	return Config{
+		Burst:       20,
+		Refill:      2 * time.Second,
+		BasePenalty: 10 * time.Second,
+		MaxPenalty:  10 * time.Minute,
+		Forgive:     10 * time.Minute,
+		MaxClients:  4096,
+	}
+}
+
 // Lenient passt zu billigen Endpunkten (Startseite, Assets, Healthcheck).
 func Lenient() Config {
 	return Config{

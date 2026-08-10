@@ -85,23 +85,38 @@ func Run() error {
 // gehört zu *einem* Router. Als globale Variablen würden sich Tests den
 // Zustand teilen und wären von ihrer Reihenfolge abhängig.
 func Handler() http.Handler {
-	analyzeLimiter := ratelimit.New(ratelimit.Strict())
+	// Die Grenzen richten sich danach, was eine Anfrage wirklich kostet.
+	// Mit Engine bindet ein Lauf die Maschine minutenlang, ohne sie
+	// antwortet der Mock in Millisekunden — dieselben Werte für beides
+	// wären entweder wirkungslos oder eine Schikane.
+	engine := katagoConfigured()
+
+	analyzeConfig := ratelimit.Moderate()
+
+	if engine {
+		analyzeConfig = ratelimit.Strict()
+	}
+
+	analyzeLimiter := ratelimit.New(analyzeConfig)
 	staticLimiter := ratelimit.New(ratelimit.Lenient())
-	analyzeSlots := make(chan struct{}, maxConcurrentAnalyses)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleHome)
 	mux.HandleFunc("/api", handleInfo)
 	mux.HandleFunc("/healthz", handleHealth)
 
-	// /analyze bekommt die strenge Begrenzung und dazu eine Obergrenze
-	// gleichzeitiger Läufe. Beides ist nötig: Die Begrenzung hält einen
-	// einzelnen Angreifer klein, der Schrank die Summe aller Anfragen. Eine
-	// Analyse belegt die Engine minutenlang; ohne Deckel genügen ein paar
-	// Clients mit je erlaubter Rate, um die Maschine zu füllen.
-	mux.Handle("/analyze", throttled(analyzeSlots,
-		limited(http.HandlerFunc(handleAnalyze), analyzeLimiter),
-	))
+	// /analyze bekommt die Begrenzung und — nur mit echter Engine — dazu
+	// eine Obergrenze gleichzeitiger Läufe. Beides ist dann nötig: Die
+	// Begrenzung hält einen einzelnen Angreifer klein, der Deckel die Summe
+	// aller Clients. Ohne Engine gibt es nichts zu deckeln; ein Mock-Lauf
+	// belegt keine Engine, und ein Deckel wiese nur nebenläufige Besucher ab.
+	analyze := limited(http.HandlerFunc(handleAnalyze), analyzeLimiter)
+
+	if engine {
+		analyze = throttled(make(chan struct{}, maxConcurrentAnalyses), analyze)
+	}
+
+	mux.Handle("/analyze", analyze)
 
 	mux.HandleFunc("/robots.txt", handleRobots)
 	mux.HandleFunc("/sitemap.xml", handleSitemap)
@@ -114,17 +129,28 @@ func Handler() http.Handler {
 	return withRecover(limited(mux, staticLimiter))
 }
 
-// trustProxy meldet, ob X-Forwarded-For ausgewertet werden darf. Hinter
-// Vercel oder einem eigenen Reverse Proxy ist die Peer-Adresse immer der
-// Proxy; ohne Proxy wäre der Header dagegen frei erfunden und die Begrenzung
-// mit einer Zeile Header zu umgehen. Deshalb ausdrücklich einschalten.
+// trustProxy meldet, ob X-Forwarded-For ausgewertet werden darf.
+//
+// Die Frage ist nicht akademisch, sondern entscheidet über zwei
+// Fehlerbilder. Glaubt der Dienst dem Header ohne Proxy davor, hebt jeder
+// Client die Begrenzung mit einer selbstgesetzten Zeile auf. Glaubt er ihm
+// *hinter* einem Proxy nicht, ist die Peer-Adresse für alle Besucher
+// dieselbe — nämlich die des Proxys — und die erste Sperre trifft das ganze
+// Publikum statt des Verursachers.
+//
+// Auf Vercel ist Letzteres der Normalfall, deshalb die automatische
+// Erkennung an der von der Plattform gesetzten Variablen VERCEL. Wer hinter
+// einem eigenen Reverse Proxy fährt, setzt GOTEACH_TRUST_PROXY; wer die
+// Erkennung ausdrücklich abschalten will, setzt sie auf 0.
 func trustProxy() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOTEACH_TRUST_PROXY"))) {
 	case "1", "true", "yes":
 		return true
+	case "0", "false", "no":
+		return false
 	}
 
-	return false
+	return strings.TrimSpace(os.Getenv("VERCEL")) != ""
 }
 
 // limited weist Anfragen ab, die über der Rate liegen.

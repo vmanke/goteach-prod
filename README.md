@@ -20,6 +20,7 @@ und einem faktenbasierten Merksatz.
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
 | `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Schnapp  |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
+| `internal/ratelimit` | Ratenbegrenzung je Client mit exponentiell wachsender Sperre          |
 | `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration)          |
 | `cmd/goteach`      | CLI                                                                     |
 
@@ -185,6 +186,29 @@ Im Vercel-Dashboard sollten Install-/Build-Command-Overrides trotzdem
 haben keine Engine; ohne die Variablen antwortet der Mock). Der Server
 lauscht auf dem `PORT` aus der Umgebung; das Root Directory des Projekts
 muss auf die Repo-Wurzel zeigen.
+
+Zwei Dinge stellt der Dienst hinter Vercel selbst um:
+
+- **Client-Erkennung.** Hinter dem Proxy ist die Peer-Adresse für alle
+  Besucher dieselbe. Würde die Ratenbegrenzung danach zählen, träfe die
+  erste Sperre das ganze Publikum statt des Verursachers. Vercel setzt die
+  Variable `VERCEL`; daran erkennt der Dienst den Proxy und wertet
+  `X-Forwarded-For` aus — und zwar den **letzten** Eintrag, weil die
+  vorderen vom Client stammen und frei erfunden sein können. Hinter einem
+  eigenen Reverse Proxy setzt man `GOTEACH_TRUST_PROXY=1`; `=0` schaltet
+  die Erkennung ausdrücklich ab.
+- **Höhe der Grenzen.** Ohne Engine antwortet der Mock in Millisekunden,
+  mit Engine dauert ein Lauf Minuten. Die strengen Werte (drei Anfragen
+  sofort, dann eine je Minute) und der Deckel auf zwei gleichzeitige Läufe
+  gelten deshalb nur, wenn `KATAGO_PATH` und `KATAGO_MODEL` gesetzt sind.
+  Auf Vercel greift die mittlere Stufe: zwanzig Anfragen sofort, danach
+  eine je zwei Sekunden, ohne Nebenläufigkeitsdeckel.
+
+**Grenze der Begrenzung auf Vercel:** Der Zustand liegt im Arbeitsspeicher
+des Prozesses. Skaliert die Plattform auf mehrere Instanzen oder startet
+sie eine neu, beginnt die Zählung dort von vorn. Gegen einen einzelnen
+lästigen Client hilft das; gegen einen verteilten Angriff ist die Firewall
+von Vercel zuständig, nicht dieser Code.
 
 ## LLM-Feinschliff (optional)
 
@@ -366,6 +390,9 @@ Mit `-moves` lässt sich der Feinschliff pro Zug weiterhin dazuschalten.
 - Erzählstränge: Der Kopplungsgraph ist eine explorative Gruppierung mit
   kontrollierter Fehltrefferquote, kein Beleg für taktische Zusammenhänge
   (Details im Abschnitt „Erzählstränge").
+- Die Ratenbegrenzung hält ihren Zustand im Arbeitsspeicher eines Prozesses.
+  Auf mehreren Instanzen zählt jede für sich; gegen einen verteilten Angriff
+  gehört eine Firewall davor.
 - Das gelernte Salienzmodul ist auf synthetischen Partien trainiert; seine
   Fenster sind gröber als die des Kopplungsgraphen.
 - Bekannte KataGo-Schwächen aus dem Architekturbericht (zyklische

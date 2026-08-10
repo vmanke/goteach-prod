@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -455,40 +456,61 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestAnalyzeBremstNachDemStossAus(t *testing.T) {
-	// Ein Lauf bindet die Engine minutenlang; ohne Begrenzung genügen ein
-	// paar Anfragen, um den Dienst lahmzulegen. Deshalb hier *ein* Handler
-	// über mehrere Anfragen — der Zustand des Begrenzers ist der Prüfpunkt.
-	t.Setenv("KATAGO_PATH", "")
-	t.Setenv("KATAGO_MODEL", "")
+func analyzePoster(t *testing.T, handler http.Handler, addr string) func() *httptest.ResponseRecorder {
+	t.Helper()
 
-	handler := Handler()
-
-	post := func() *httptest.ResponseRecorder {
+	return func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/analyze",
 			strings.NewReader(demoSGF))
-		req.RemoteAddr = "203.0.113.9:4444"
+		req.RemoteAddr = addr
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 
 		return rr
 	}
+}
 
-	for i := 0; i < 3; i++ {
-		if rr := post(); rr.Code != http.StatusOK {
+// driveUntilLimited feuert, bis die Begrenzung greift. Bewusst ohne feste
+// Zahl: Die Burst-Groesse haengt davon ab, ob eine Engine konfiguriert ist,
+// und der Test prueft das Verhalten, nicht die Kalibrierung.
+func driveUntilLimited(t *testing.T, post func() *httptest.ResponseRecorder,
+	limit int) *httptest.ResponseRecorder {
+
+	t.Helper()
+
+	for i := 0; i < limit; i++ {
+		rr := post()
+
+		if rr.Code == http.StatusTooManyRequests {
+			if i == 0 {
+				t.Fatal("schon die erste Anfrage wurde abgewiesen")
+			}
+
+			return rr
+		}
+
+		if rr.Code != http.StatusOK {
 			t.Fatalf("Anfrage %d: Status %d, Body: %s", i+1, rr.Code, rr.Body.String())
 		}
 	}
 
-	rr := post()
+	t.Fatalf("nach %d Anfragen keine Begrenzung", limit)
 
-	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("Status %d, erwartet 429", rr.Code)
-	}
+	return nil
+}
+
+func TestAnalyzeBremstNachDemStossAus(t *testing.T) {
+	// Ein Lauf bindet die Engine minutenlang; ohne Begrenzung genuegen ein
+	// paar Anfragen, um den Dienst lahmzulegen. Deshalb hier *ein* Handler
+	// ueber mehrere Anfragen — der Zustand des Begrenzers ist der Pruefpunkt.
+	t.Setenv("KATAGO_PATH", "")
+	t.Setenv("KATAGO_MODEL", "")
+
+	rr := driveUntilLimited(t, analyzePoster(t, Handler(), "203.0.113.9:4444"), 200)
 
 	if rr.Header().Get("Retry-After") == "" {
-		t.Error("Retry-After fehlt — der Client weiß sonst nicht, wann er darf")
+		t.Error("Retry-After fehlt — der Client weiss sonst nicht, wann er darf")
 	}
 
 	if !strings.Contains(rr.Body.String(), "zu viele Anfragen") {
@@ -501,56 +523,92 @@ func TestBegrenzungTrenntDieClients(t *testing.T) {
 	t.Setenv("KATAGO_MODEL", "")
 
 	handler := Handler()
+	driveUntilLimited(t, analyzePoster(t, handler, "203.0.113.9:4444"), 200)
 
-	post := func(addr string) int {
-		req := httptest.NewRequest(http.MethodPost, "/analyze",
-			strings.NewReader(demoSGF))
-		req.RemoteAddr = addr
-
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-
-		return rr.Code
-	}
-
-	for i := 0; i < 4; i++ {
-		post("203.0.113.9:4444")
-	}
-
-	if code := post("198.51.100.4:4444"); code != http.StatusOK {
-		t.Fatalf("zweiter Client bekam %d — die Sperre gilt pro Client", code)
+	if rr := analyzePoster(t, handler, "198.51.100.4:4444")(); rr.Code != http.StatusOK {
+		t.Fatalf("zweiter Client bekam %d — die Sperre gilt pro Client", rr.Code)
 	}
 }
 
 func TestForwardedForZaehltNurMitVertrauen(t *testing.T) {
-	// Ohne gesetztes GOTEACH_TRUST_PROXY darf ein selbstgesetzter Header die
-	// Begrenzung nicht aushebeln.
+	// Ohne Proxy davor darf ein selbstgesetzter Header die Begrenzung nicht
+	// aushebeln: Sonst genuegt eine frei erfundene Zeile je Anfrage.
 	t.Setenv("KATAGO_PATH", "")
 	t.Setenv("KATAGO_MODEL", "")
-	t.Setenv("GOTEACH_TRUST_PROXY", "")
+	t.Setenv("GOTEACH_TRUST_PROXY", "0")
+	t.Setenv("VERCEL", "")
 
 	handler := Handler()
+	counter := 0
 
-	post := func(forwarded string) int {
+	post := func() *httptest.ResponseRecorder {
+		counter++
+
 		req := httptest.NewRequest(http.MethodPost, "/analyze",
 			strings.NewReader(demoSGF))
 		req.RemoteAddr = "203.0.113.9:4444"
-		req.Header.Set("X-Forwarded-For", forwarded)
+		// Jede Anfrage behauptet eine andere Herkunft.
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.0.0.%d", counter%250))
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 
-		return rr.Code
+		return rr
 	}
 
-	for i := 0; i < 3; i++ {
-		if code := post("10.0.0.1"); code != http.StatusOK {
-			t.Fatalf("Anfrage %d: Status %d", i+1, code)
+	driveUntilLimited(t, post, 200)
+}
+
+func TestHinterProxyZaehltDerLetzteForwardedEintrag(t *testing.T) {
+	// Hinter Vercel ist die Peer-Adresse fuer alle Besucher dieselbe. Ohne
+	// Auswertung des Headers traefe die erste Sperre das ganze Publikum.
+	t.Setenv("KATAGO_PATH", "")
+	t.Setenv("KATAGO_MODEL", "")
+	t.Setenv("GOTEACH_TRUST_PROXY", "1")
+
+	handler := Handler()
+
+	post := func(client string) func() *httptest.ResponseRecorder {
+		return func() *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, "/analyze",
+				strings.NewReader(demoSGF))
+			req.RemoteAddr = "10.0.0.1:4444" // immer der Proxy
+			req.Header.Set("X-Forwarded-For", client)
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			return rr
 		}
 	}
 
-	// Neue erfundene Adresse, gleiche Peer-Adresse: muss trotzdem greifen.
-	if code := post("10.0.0.99"); code != http.StatusTooManyRequests {
-		t.Fatalf("Status %d, erwartet 429 — Header wurde geglaubt", code)
+	driveUntilLimited(t, post("203.0.113.9"), 200)
+
+	if rr := post("198.51.100.4")(); rr.Code != http.StatusOK {
+		t.Fatalf("zweiter Besucher bekam %d — die Sperre traf das ganze Publikum",
+			rr.Code)
+	}
+}
+
+func TestVercelWirdAlsProxyErkannt(t *testing.T) {
+	// Ohne die Erkennung waere die Begrenzung auf Vercel ein Selbsttor.
+	t.Setenv("GOTEACH_TRUST_PROXY", "")
+	t.Setenv("VERCEL", "")
+
+	if trustProxy() {
+		t.Fatal("ohne Umgebung darf kein Proxy angenommen werden")
+	}
+
+	t.Setenv("VERCEL", "1")
+
+	if !trustProxy() {
+		t.Fatal("auf Vercel muss der Proxy erkannt werden")
+	}
+
+	// Ausdrueckliches Abschalten schlaegt die Erkennung.
+	t.Setenv("GOTEACH_TRUST_PROXY", "0")
+
+	if trustProxy() {
+		t.Fatal("GOTEACH_TRUST_PROXY=0 muss die Erkennung ueberstimmen")
 	}
 }
