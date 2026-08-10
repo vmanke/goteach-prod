@@ -248,6 +248,25 @@ Hinweise:
   die echte Analyse; Vercel nutzt ihn per `KATAGO_REMOTE_URL` als
   Remote-Engine (siehe „Remote-Engine“) oder bleibt ohne sie Demo (Mock).
 
+### Fly.io-Deployment (echte Engine)
+
+Die committete `fly.toml` deployt das Dockerfile mit sinnvollen
+Voreinstellungen — 4 Performance-Kerne (KataGo sättigt alle), Warteschlange
+statt paralleler Analysen, Healthcheck auf `/healthz`, Schlafen ohne
+Verkehr:
+
+```bash
+fly launch --no-deploy   # einmalig; übernimmt fly.toml (App-Name anpassen)
+fly deploy
+curl -s https://<app>.fly.dev/api   # "katago": true
+```
+
+Danach in der Vereinsseite `content::ANALYZE_URL` auf
+`https://<app>.fly.dev/analyze` stellen (der Deploy-Test dort erinnert an
+die zugehörige CSP-Zeile). Der Fly-Proxy trennt still stehende
+Verbindungen; lange Partien deshalb mit moderaten `visits` oder in
+`from`/`to`-Abschnitten analysieren.
+
 ### Vercel-Deployment
 
 Vercels Go-Support baut den Server nur im **Standalone-Modus**, wenn das

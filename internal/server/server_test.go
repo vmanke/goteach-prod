@@ -837,3 +837,91 @@ func TestAnalyzeRemoteEngineDown(t *testing.T) {
 		t.Fatalf("Status = %d, erwartet 502", rr.Code)
 	}
 }
+
+func TestAnalyzeLinesFormat(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/analyze?format=lines",
+		strings.NewReader(demoSGF))
+
+	rr := serve(t, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, erwartet text/plain", ct)
+	}
+
+	records := strings.Split(rr.Body.String(), linesRecordSep)
+
+	// Ein Kopfsatz plus ein Satz je Zug.
+	if len(records) != 11 {
+		t.Fatalf("Datensätze = %d, erwartet 11", len(records))
+	}
+
+	head := strings.Split(records[0], linesFieldSep)
+
+	if len(head) != 6 {
+		t.Fatalf("Kopfsatz hat %d Felder, erwartet 6: %q", len(head), records[0])
+	}
+
+	if head[0] != "H" || head[1] != "19" || head[2] != "7.5" || head[5] != "true" {
+		t.Errorf("Kopfsatz unerwartet: %q", records[0])
+	}
+
+	first := strings.Split(records[1], linesFieldSep)
+
+	if len(first) != 10 || first[0] != "M" || first[1] != "1" || first[2] != "Schwarz" {
+		t.Errorf("erster Zugsatz unerwartet: %q", records[1])
+	}
+
+	// Der Lehrtext ist das letzte Feld und darf keine Steuerzeichen mehr
+	// tragen, sonst zerfällt der Datensatz beim Splitten.
+	if text := first[9]; text == "" || strings.ContainsAny(text, "\n\x1e\x1f") {
+		t.Errorf("Lehrtext leer oder mit Steuerzeichen: %q", text)
+	}
+}
+
+func TestCORSAllowsTheClubSiteOnly(t *testing.T) {
+	// Erlaubter Absender: Origin wird gespiegelt, Vary gesetzt.
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Origin", "https://flascheleer-berlin.de")
+
+	rr := serve(t, req)
+
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://flascheleer-berlin.de" {
+		t.Errorf("Allow-Origin = %q, erwartet die Vereinsseite", got)
+	}
+
+	if !strings.Contains(strings.Join(rr.Header().Values("Vary"), ","), "Origin") {
+		t.Error("Vary: Origin fehlt")
+	}
+
+	// Fremder Absender: keine CORS-Freigabe.
+	req = httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Origin", "https://evil.example")
+
+	rr = serve(t, req)
+
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("fremder Origin wurde freigegeben: %q", got)
+	}
+}
+
+func TestCORSPreflight(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/analyze", nil)
+	req.Header.Set("Origin", "https://flascheleer-berlin.de")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+
+	rr := serve(t, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("Preflight-Status = %d, erwartet 204", rr.Code)
+	}
+
+	if got := rr.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "POST") {
+		t.Errorf("Allow-Methods = %q, POST fehlt", got)
+	}
+}
