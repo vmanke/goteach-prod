@@ -1,0 +1,26 @@
+# Deployt den Dienst zu Fly.io — bei jedem Push auf main und auf Knopfdruck
+# (Actions → Fly Deploy → Run workflow). Braucht das Repository-Secret
+# FLY_API_TOKEN (Deploy-Token der App, siehe README); solange es fehlt,
+# schlägt der Lauf mit einer Auth-Meldung fehl und richtet nichts an.
+name: Fly Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Nie zwei Deploys gleichzeitig; ein wartender reicht.
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # --remote-only: das Image baut Flys Build-Server, nicht der Runner.
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

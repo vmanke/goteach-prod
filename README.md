@@ -273,8 +273,17 @@ curl -s https://<app>.fly.dev/api   # "katago": true
 Danach in der Vereinsseite `content::ANALYZE_URL` auf
 `https://<app>.fly.dev/analyze` stellen (der Deploy-Test dort erinnert an
 die zugehörige CSP-Zeile). Der Fly-Proxy trennt still stehende
-Verbindungen; lange Partien deshalb mit moderaten `visits` oder in
-`from`/`to`-Abschnitten analysieren.
+Verbindungen; `/analyze` hält sie deshalb mit Heartbeat-Füllbytes offen —
+lange Partien dauern trotzdem lange, moderate `visits` oder
+`from`/`to`-Abschnitte bleiben sinnvoll.
+
+**Automatisch statt von Hand:** `.github/workflows/fly-deploy.yml` deployt
+bei jedem Push auf `main` (und per Knopfdruck unter Actions → Fly Deploy).
+Einmalig einzurichten: in der Fly-Weboberfläche unter der App → **Tokens**
+ein Deploy-Token erzeugen und es im GitHub-Repo unter Settings → Secrets
+and variables → Actions als **`FLY_API_TOKEN`** hinterlegen. Ohne das
+Secret schlägt der Workflow mit einer Auth-Meldung fehl und richtet nichts
+an.
 
 ### Vercel-Deployment
 
