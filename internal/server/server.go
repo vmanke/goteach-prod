@@ -64,6 +64,16 @@ func Run() error {
 		port = "8080"
 	}
 
+	// Fehlkonfigurierte Auth fällt so beim Start auf, nicht erst beim
+	// ersten Login (fail closed bleibt trotzdem: die Handler prüfen erneut).
+	if err := validateAuthEnv(); err != nil {
+		return fmt.Errorf("Auth: %w", err)
+	}
+
+	if err := validateRemoteEnv(); err != nil {
+		return fmt.Errorf("Remote-Engine: %w", err)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           Handler(),
@@ -72,8 +82,9 @@ func Run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	log.Printf("goteach-server: lausche auf :%s (KataGo konfiguriert: %v)",
-		port, katagoConfigured())
+	log.Printf("goteach-server: lausche auf :%s "+
+		"(KataGo lokal: %v, Remote-Engine: %v, Auth: %v)",
+		port, katagoConfigured(), katagoRemoteConfigured(), authEnabled())
 
 	return srv.ListenAndServe()
 }
@@ -84,7 +95,9 @@ func Handler() http.Handler {
 	mux.HandleFunc("/", handleHome)
 	mux.HandleFunc("/api", handleInfo)
 	mux.HandleFunc("/healthz", handleHealth)
-	mux.HandleFunc("/analyze", handleAnalyze)
+	mux.HandleFunc("/login", handleLogin)
+	mux.HandleFunc("/analyze", requireAuth(handleAnalyze))
+	mux.HandleFunc("/engine/analyze", handleEngineAnalyze)
 	mux.HandleFunc("/robots.txt", handleRobots)
 	mux.HandleFunc("/sitemap.xml", handleSitemap)
 	mux.HandleFunc("/app.js", handleAsset("app.js", "text/javascript; charset=utf-8"))
@@ -137,7 +150,9 @@ func withCORS(next http.Handler) http.Handler {
 			// Content-Type erlaubt ist, und braucht dafür keinen Body.
 			if r.Method == http.MethodOptions {
 				h.Set("Access-Control-Allow-Methods", "GET, POST")
-				h.Set("Access-Control-Allow-Headers", "Content-Type")
+				// Authorization gehört dazu, seit /analyze hinter
+				// optionalem JWT-Login liegen kann.
+				h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 				h.Set("Access-Control-Max-Age", "86400")
 				w.WriteHeader(http.StatusNoContent)
 
@@ -174,6 +189,29 @@ func katagoConfigured() bool {
 	return os.Getenv("KATAGO_PATH") != "" && os.Getenv("KATAGO_MODEL") != ""
 }
 
+// katagoRemoteConfigured meldet, ob Analysen an einen entfernten
+// Engine-Host delegiert werden (z. B. Vercel → Docker-Host).
+func katagoRemoteConfigured() bool {
+	return os.Getenv("KATAGO_REMOTE_URL") != ""
+}
+
+// engineAvailable meldet, ob es irgendeinen Weg zu echten Analysen gibt.
+func engineAvailable() bool {
+	return katagoConfigured() || katagoRemoteConfigured()
+}
+
+// validateRemoteEnv prüft die Remote-Konfiguration beim Serverstart.
+// Eine URL ohne Token liefe sonst deterministisch in 401→502 beim
+// Engine-Host — schwer zu diagnostizieren; der Passthrough verlangt
+// immer ein Token.
+func validateRemoteEnv() error {
+	if katagoRemoteConfigured() && os.Getenv("KATAGO_REMOTE_TOKEN") == "" {
+		return errors.New("KATAGO_REMOTE_TOKEN fehlt (KATAGO_REMOTE_URL ist gesetzt)")
+	}
+
+	return nil
+}
+
 // handleInfo liefert die Dienstinfo als JSON (GET /api).
 func handleInfo(w http.ResponseWriter, r *http.Request) {
 	if !allowGetHead(w, r) {
@@ -186,11 +224,14 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 func serveInfo(w http.ResponseWriter) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":  "goteach",
-		"katago":   katagoConfigured(),
+		"katago":   engineAvailable(),
+		"auth":     authEnabled(),
+		"login":    "POST /login mit JSON {\"username\":…,\"password\":…} → JWT (nur bei aktiver Auth)",
 		"frontend": "GET / (HTML im Browser)",
 		"analyze": "POST /analyze mit SGF (roh, Formularfeld oder Datei-Upload \"sgf\") " +
 			"oder ogs=<URL|ID> (online-go.com); Parameter: visits, tau, from, to, " +
-			"rules, komi; download=1 für Datei-Download",
+			"rules, komi; download=1 für Datei-Download; bei aktiver Auth mit " +
+			"Authorization: Bearer <Token>",
 		"warnung": "ohne konfigurierte KataGo-Engine sind alle Werte synthetisch (Mock)",
 		"healthz": "GET /healthz",
 	})
@@ -304,9 +345,23 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	report, err := teaching.AnalyzeGame(game, an, opt)
 
 	if err != nil {
+		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
+		// kein internes Problem dieser Instanz.
+		if errors.Is(err, katago.ErrRemote) {
+			httpError(w, http.StatusBadGateway, "Remote-Engine: %v", err)
+
+			return
+		}
+
 		httpError(w, http.StatusInternalServerError, "Analyse: %v", err)
 
 		return
+	}
+
+	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts, ob dort
+	// eine echte Engine oder der Mock gerechnet hat.
+	if rm, ok := an.(*katago.Remote); ok {
+		synthetic = rm.Synthetic()
 	}
 
 	// Effektive Werte melden: Query-Parameter (opt) überschreiben die
@@ -431,9 +486,31 @@ func writeLines(w http.ResponseWriter, resp analyzeResponse) {
 	_, _ = io.WriteString(w, strings.Join(records, linesRecordSep))
 }
 
-// startAnalyzer liefert die Engine dieser Instanz. Ohne konfigurierte
-// KataGo-Binary läuft der Mock; die Antwort trägt dann "synthetic": true.
+// startAnalyzer liefert die Engine dieser Instanz. Eine lokale Binary
+// (KATAGO_PATH/KATAGO_MODEL) gewinnt; sonst delegiert KATAGO_REMOTE_URL
+// an einen entfernten Engine-Host. Ohne beides läuft der Mock; die
+// Antwort trägt dann "synthetic": true.
 func startAnalyzer() (katago.Analyzer, bool, error) {
+	if !katagoConfigured() && katagoRemoteConfigured() {
+		// Doppelter Boden zum Start-Check in Run: auch eingebettete Nutzung
+		// des Handlers scheitert mit klarer Ursache statt 401→502.
+		if err := validateRemoteEnv(); err != nil {
+			return nil, false, err
+		}
+
+		// synthetic entscheidet der Engine-Host; handleAnalyze übernimmt
+		// dessen Flag nach der Analyse aus katago.Remote.
+		return katago.NewRemote(os.Getenv("KATAGO_REMOTE_URL"),
+			os.Getenv("KATAGO_REMOTE_TOKEN")), false, nil
+	}
+
+	return startLocalAnalyzer()
+}
+
+// startLocalAnalyzer liefert Binary-Engine oder Mock — nie Remote. Der
+// Engine-Passthrough nutzt ausschließlich diese Variante, damit sich
+// zwei Instanzen nicht gegenseitig endlos weiterreichen können.
+func startLocalAnalyzer() (katago.Analyzer, bool, error) {
 	if !katagoConfigured() {
 		return katago.Mock{}, true, nil
 	}

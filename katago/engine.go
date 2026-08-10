@@ -71,14 +71,16 @@ func (r *Result) Best() *MoveInfo {
 	return &r.MoveInfos[best]
 }
 
-// Request beschreibt eine zu analysierende Partie/Stellung.
+// Request beschreibt eine zu analysierende Partie/Stellung. Die JSON-Tags
+// dienen dem Remote-Passthrough (POST /engine/analyze, siehe Remote) —
+// die Query an die lokale Engine baut AnalyzeGame weiterhin selbst.
 type Request struct {
-	InitialStones [][2]string // z. B. Handicap: {{"B","D4"}, ...}
-	Moves         [][2]string // Züge in GTP-Koordinaten: {{"B","Q16"}, ...}
-	Rules         string      // "chinese", "japanese", "tromp-taylor", ...
-	Komi          float64
-	Size          int
-	MaxVisits     int
+	InitialStones [][2]string `json:"initialStones,omitempty"` // z. B. Handicap: {{"B","D4"}, ...}
+	Moves         [][2]string `json:"moves"`                   // Züge in GTP-Koordinaten: {{"B","Q16"}, ...}
+	Rules         string      `json:"rules"`                   // "chinese", "japanese", "tromp-taylor", ...
+	Komi          float64     `json:"komi"`
+	Size          int         `json:"size"`
+	MaxVisits     int         `json:"maxVisits,omitempty"`
 }
 
 // Analyzer abstrahiert die Engine, damit Tests und Offline-Demos ohne

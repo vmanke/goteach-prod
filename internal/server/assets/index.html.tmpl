@@ -49,6 +49,26 @@
   </aside>
   {{end}}
 
+  {{if .Auth}}
+  <section class="card" id="login" aria-labelledby="login-title">
+    <h2 id="login-title">Anmelden</h2>
+    <p>Diese Instanz verlangt einen Login für Analysen; das Token gilt nur
+    für diesen Browser-Tab.</p>
+    <form id="login-form">
+      <div class="options-grid">
+        <label class="field"><span>Benutzername</span>
+          <input type="text" name="username" autocomplete="username" required></label>
+        <label class="field"><span>Passwort</span>
+          <input type="password" name="password" autocomplete="current-password" required></label>
+      </div>
+      <div class="actions">
+        <button type="submit" id="login-btn">Anmelden</button>
+      </div>
+    </form>
+    <p id="login-status" class="status" role="status" aria-live="polite"></p>
+  </section>
+  {{end}}
+
   <section class="card" id="upload" aria-labelledby="upload-title">
     <h2 id="upload-title">SGF hochladen &amp; analysieren</h2>
     <form id="analyze-form" action="/analyze" method="post" enctype="multipart/form-data">
@@ -124,6 +144,12 @@
       <tbody>
         <tr><td><code>GET /api</code></td><td>Dienstinfo (JSON)</td></tr>
         <tr><td><code>GET /healthz</code></td><td>Liveness-Check</td></tr>
+        {{if .Auth}}
+        <tr><td><code>POST /login</code></td>
+            <td>JSON <code>{"username":…,"password":…}</code> → JWT;
+                danach <code>Authorization: Bearer &lt;Token&gt;</code>
+                an <code>/analyze</code></td></tr>
+        {{end}}
         <tr><td><code>POST /analyze</code></td>
             <td>SGF im Body (roh, Formularfeld oder Datei-Upload
                 <code>sgf</code>) → Teaching-Reports als JSON</td></tr>

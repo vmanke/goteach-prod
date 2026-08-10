@@ -50,6 +50,78 @@
     });
   }
 
+  // JWT-Login: Token nur im sessionStorage (Tab-Lebensdauer, kein Cookie).
+  // Ohne aktive Auth (state.authRequired false) existiert die Login-Karte
+  // nicht und alle Funktionen laufen wie bisher.
+  var loginSection = document.getElementById('login');
+  var loginForm = document.getElementById('login-form');
+  var loginStatus = document.getElementById('login-status');
+
+  function getToken() {
+    try {
+      return sessionStorage.getItem('goteach-token') || '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function setToken(token) {
+    try {
+      if (token) {
+        sessionStorage.setItem('goteach-token', token);
+      } else {
+        sessionStorage.removeItem('goteach-token');
+      }
+    } catch (err) { /* privater Modus o. Ä.: Login gilt nur bis zum Reload */ }
+  }
+
+  function showLogin(show) {
+    if (loginSection) {
+      loginSection.hidden = !show;
+    }
+  }
+
+  function authHeaders(headers) {
+    var token = getToken();
+
+    if (state.authRequired && token) {
+      headers.Authorization = 'Bearer ' + token;
+    }
+
+    return headers;
+  }
+
+  if (loginForm) {
+    showLogin(!getToken());
+
+    loginForm.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      loginStatus.textContent = '';
+      loginStatus.classList.remove('error');
+
+      var username = loginForm.elements.namedItem('username').value.trim();
+      var password = loginForm.elements.namedItem('password').value;
+
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, password: password })
+      }).then(function (res) {
+        return res.json().then(function (payload) {
+          if (!res.ok) {
+            throw new Error(payload.error || ('HTTP ' + res.status));
+          }
+
+          setToken(payload.token);
+          showLogin(false);
+        });
+      }).catch(function (err) {
+        loginStatus.textContent = 'Login fehlgeschlagen: ' + err.message;
+        loginStatus.classList.add('error');
+      });
+    });
+  }
+
   var form = document.getElementById('analyze-form');
 
   if (!form) {
@@ -254,10 +326,18 @@
 
       return fetch('/analyze?' + queryFromOptions().toString(), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-go-sgf' },
+        headers: authHeaders({ 'Content-Type': 'application/x-go-sgf' }),
         body: sgf
       }).then(function (res) {
         return res.json().then(function (payload) {
+          if (res.status === 401 && state.authRequired) {
+            // Token fehlt, ist abgelaufen oder ungültig: verwerfen und
+            // die Login-Karte wieder anbieten.
+            setToken('');
+            showLogin(true);
+            throw new Error(payload.error || 'Login nötig');
+          }
+
           if (!res.ok) {
             throw new Error(payload.error || ('HTTP ' + res.status));
           }
