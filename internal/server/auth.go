@@ -214,7 +214,7 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		_, secret, err := authConfig()
+		users, secret, err := authConfig()
 
 		if err != nil {
 			log.Printf("goteach-server: Auth fehlkonfiguriert: %v", err)
@@ -233,9 +233,21 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if _, err := auth.VerifyHS256(secret, token, time.Now()); err != nil {
+		claims, err := auth.VerifyHS256(secret, token, time.Now())
+
+		if err != nil {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			httpError(w, http.StatusUnauthorized, "Token ungültig: %v", err)
+
+			return
+		}
+
+		// Signatur und Ablauf genügen nicht: Der Benutzer muss auch noch
+		// existieren. So wirkt das Entfernen aus AUTH_USERS sofort, nicht
+		// erst beim Token-Ablauf; der iss-Check lehnt fremde Aussteller ab.
+		if _, ok := users[claims.Sub]; !ok || claims.Iss != tokenIssuer {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			httpError(w, http.StatusUnauthorized, "Token ungültig: Benutzer unbekannt")
 
 			return
 		}

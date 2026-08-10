@@ -169,7 +169,12 @@ Falscher Name und falsches Passwort ergeben dieselbe 401-Antwort (kein
 User-Enumeration; unbekannte Namen kosten per Dummy-Hash gleich viel
 Zeit). Tokens sind HS256-signiert (`alg` gepinnt, `none` abgelehnt),
 laufen nach `AUTH_TOKEN_TTL` ab (30 s Toleranz für Uhrenversatz) und
-werden in konstanter Zeit verglichen. Die Startseite zeigt bei aktiver
+werden in konstanter Zeit verglichen. Zusätzlich zur Signatur prüft
+jede Anfrage, ob der Benutzer aus dem Token noch in `AUTH_USERS` steht —
+einen Eintrag entfernen sperrt also sofort aus, nicht erst beim
+Token-Ablauf (Passwort-Änderung bei gleichem Namen lässt bestehende
+Tokens dagegen bis `exp` gültig; wer das braucht, rotiert
+`AUTH_JWT_SECRET` und loggt damit alle aus). Die Startseite zeigt bei aktiver
 Auth ein Login-Formular; das Token lebt nur im `sessionStorage` des
 Tabs. Ein Rate-Limit auf `/login` gibt es bewusst nicht (der Dienst ist
 zustandslos); die PBKDF2-Kosten bremsen Brute-Force serverseitig.

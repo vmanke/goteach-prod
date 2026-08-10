@@ -648,6 +648,47 @@ func TestAnalyzeRequiresAuth(t *testing.T) {
 	}
 }
 
+// Ein gültig signiertes Token nützt nichts mehr, sobald der Benutzer aus
+// AUTH_USERS entfernt wurde — Revocation wirkt sofort, nicht erst bei exp.
+func TestAnalyzeRejectsRemovedUser(t *testing.T) {
+	now := time.Now()
+	token := auth.SignHS256([]byte("test-secret"), auth.Claims{
+		Sub: "alice", Iss: "goteach",
+		Iat: now.Unix(), Exp: now.Add(time.Hour).Unix(),
+	})
+
+	env := map[string]string{
+		"AUTH_USERS":      "bob:" + testUserHash, // alice existiert nicht mehr
+		"AUTH_JWT_SECRET": "test-secret",
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	if rr := serveEnv(t, req, env); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Status = %d, erwartet 401", rr.Code)
+	}
+}
+
+// Ein Token mit fremdem Aussteller wird abgelehnt, auch wenn Signatur,
+// Ablauf und Benutzername stimmen.
+func TestAnalyzeRejectsForeignIssuer(t *testing.T) {
+	now := time.Now()
+	token := auth.SignHS256([]byte("test-secret"), auth.Claims{
+		Sub: "alice", Iss: "anderer-dienst",
+		Iat: now.Unix(), Exp: now.Add(time.Hour).Unix(),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	if rr := serveEnv(t, req, authEnv()); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("Status = %d, erwartet 401", rr.Code)
+	}
+}
+
 func TestAnalyzeRejectsExpiredToken(t *testing.T) {
 	now := time.Now()
 	expired := auth.SignHS256([]byte("test-secret"), auth.Claims{
