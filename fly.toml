@@ -1,0 +1,60 @@
+# Fly.io-Deployment des goteach-Servers MIT echter KataGo-Engine.
+#
+# Warum Fly und nicht Vercel: der Dienst braucht das KataGo-Binary und das
+# neuronale Netz auf der Maschine und rechnet pro Anfrage Minuten auf der
+# CPU — beides kann eine Serverless-Funktion nicht. Das Dockerfile dieses
+# Repos baut genau dieses Image; diese Datei sagt Fly nur, wie es laufen
+# soll.
+#
+#   fly launch --no-deploy   # einmalig; übernimmt diese Datei
+#   fly deploy
+#
+# Danach zeigt die Vereinsseite mit content::ANALYZE_URL auf
+# https://<app>.fly.dev/analyze (plus dieselbe Origin in der CSP).
+#
+# Betriebsnotizen:
+# * KataGo startet pro /analyze-Anfrage als Kindprozess und lädt das Netz
+#   neu — auf 4 Kernen kostet schon eine kurze Partie ~2 Minuten. Die
+#   Maschinengröße unten (4 Performance-Kerne) ist dafür das sinnvolle
+#   Minimum; kleiner wird es zäh, größer wird es besser.
+# * Der Fly-Proxy trennt Verbindungen, auf denen länger nichts ankommt.
+#   KataGo antwortet erst am Ende — lange Partien deshalb mit moderaten
+#   visits (Query-Parameter) oder in Zugbereichen (from/to) analysieren.
+# * auto_stop/auto_start: die Maschine schläft ohne Verkehr und kostet
+#   dann nichts; die erste Anfrage weckt sie (ein paar Sekunden Kaltstart,
+#   zusätzlich zur Analysezeit).
+# * CORS: die Vereinsseite ist per Default freigegeben (internal/server);
+#   weitere Absender über GOTEACH_CORS_ORIGINS im [env]-Block.
+
+app = "goteach-prod"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # KataGo sättigt alle Kerne; eine zweite Analyse gleichzeitig macht beide
+  # langsamer. Eine kleine Warteschlange statt Parallelität.
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 2
+    soft_limit = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "performance-4x"
