@@ -27,6 +27,7 @@ type homeData struct {
 	Canonical string
 	Base      string
 	Katago    bool
+	Auth      bool
 	MaxVisits int
 	State     template.JS
 	LDJSON    template.JS
@@ -77,8 +78,9 @@ func renderHome(w http.ResponseWriter, r *http.Request) {
 	// Hydration-Zustand für assets/app.js; json.Marshal maskiert <, > und &,
 	// daher kann der Inhalt kein </script> enthalten.
 	state, err := json.Marshal(map[string]any{
-		"katago":        katagoConfigured(),
-		"synthetic":     !katagoConfigured(),
+		"katago":        engineAvailable(),
+		"synthetic":     !engineAvailable(),
+		"authRequired":  authEnabled(),
 		"maxVisits":     maxVisits,
 		"maxSGFBytes":   maxSGFBytes,
 		"defaultVisits": defaultVisits,
@@ -119,7 +121,8 @@ func renderHome(w http.ResponseWriter, r *http.Request) {
 	err = homeTmpl.Execute(&buf, homeData{
 		Canonical: canonical,
 		Base:      base,
-		Katago:    katagoConfigured(),
+		Katago:    engineAvailable(),
+		Auth:      authEnabled(),
 		MaxVisits: maxVisits,
 		State:     template.JS(state),
 		LDJSON:    template.JS(ld),
