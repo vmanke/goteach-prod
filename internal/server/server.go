@@ -372,8 +372,11 @@ func startLocalAnalyzer() (katago.Analyzer, bool, error) {
 		configPath = "analysis.cfg"
 	}
 
+	// KATAGO_OVERRIDES ("k=v,k=v") erlaubt Hardware-Tuning ohne Rebuild,
+	// z. B. mehr Suchthreads auf Maschinen mit vielen vCPUs.
 	eng, err := katago.Start(
-		os.Getenv("KATAGO_PATH"), os.Getenv("KATAGO_MODEL"), configPath)
+		os.Getenv("KATAGO_PATH"), os.Getenv("KATAGO_MODEL"), configPath,
+		os.Getenv("KATAGO_OVERRIDES"))
 
 	if err != nil {
 		return nil, false, err

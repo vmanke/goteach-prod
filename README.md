@@ -239,8 +239,17 @@ Hinweise:
 
 - **CPU-Kosten:** Der Engine-Start pro Anfrage lädt das Netz (≈ 10–20 s
   auf CPU); Analysen skalieren mit Visits × Stellungen. Mit `visits`,
-  `from`/`to` dosieren; `numAnalysisThreads`/`numSearchThreadsPerAnalysisThread`
-  in `analysis.cfg` an die vCPUs anpassen.
+  `from`/`to` dosieren.
+- **Thread-Tuning:** Die `analysis.cfg` ist bewusst konservativ
+  (`numAnalysisThreads = 1`, `numSearchThreadsPerAnalysisThread = 4`,
+  `nnMaxBatchSize = 8`), damit kleine Cloud-Container (Railway, Render …)
+  stabil bleiben: Sättigt KataGo alle vCPUs, verhungert der Healthcheck
+  und der Orchestrator stoppt den Container mitten in der Analyse
+  („Stopping Container“). Auf dicker Hardware ohne Rebuild hochdrehen —
+  Faustregel Suchthreads ≈ vCPUs − 1:
+  `KATAGO_OVERRIDES="numSearchThreadsPerAnalysisThread=16,nnMaxBatchSize=32"`
+  (Format `schlüssel=wert,…`, wird als `-override-config` an KataGo
+  durchgereicht; im CLI als Flag `-overrides`).
 - **CPU ohne AVX2:** mit `--build-arg KATAGO_FLAVOR=eigen` bauen. Die
   Release-Binaries sind x64; auf ARM (z. B. Apple Silicon) KataGo selbst
   kompilieren oder auf einem x64-Host deployen.
