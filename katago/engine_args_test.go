@@ -15,9 +15,10 @@ func TestEngineArgs(t *testing.T) {
 		t.Errorf("ohne Overrides: %v, %v", got, err)
 	}
 
-	// Mehrere Overrides inkl. Whitespace.
+	// Mehrere Overrides inkl. Whitespace — auch um das "=" herum; die
+	// Einträge müssen normalisiert (getrimmt) bei KataGo ankommen.
 	got, err = engineArgs("net.bin.gz", "a.cfg",
-		" numSearchThreadsPerAnalysisThread=16 , nnMaxBatchSize=32 ,")
+		" numSearchThreadsPerAnalysisThread = 16 , nnMaxBatchSize=32 ,")
 
 	want := append(append([]string{}, base...),
 		"-override-config", "numSearchThreadsPerAnalysisThread=16",

@@ -126,13 +126,17 @@ func engineArgs(modelPath, configPath, overrides string) ([]string, error) {
 		}
 
 		key, value, ok := strings.Cut(entry, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 
-		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		if !ok || key == "" || value == "" {
 			return nil, fmt.Errorf(
 				"katago: Override ohne \"schlüssel=wert\": %q", entry)
 		}
 
-		args = append(args, "-override-config", entry)
+		// Normalisiert weitergeben: Leerzeichen um "=" würden sonst Teil
+		// des KataGo-Schlüssels bzw. -Werts.
+		args = append(args, "-override-config", key+"="+value)
 	}
 
 	return args, nil
@@ -320,9 +324,11 @@ func (e *Engine) Close() error {
 
 	err := e.cmd.Wait()
 
+	// ExitCode -1 = durch Signal beendet (robuster als der
+	// plattformabhängige Fehlertext "signal: killed").
 	var exit *exec.ExitError
 
-	if errors.As(err, &exit) && exit.Error() == "signal: killed" {
+	if errors.As(err, &exit) && exit.ExitCode() == -1 {
 		return nil
 	}
 
