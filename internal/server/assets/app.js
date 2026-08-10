@@ -342,6 +342,13 @@
             throw new Error(payload.error || ('HTTP ' + res.status));
           }
 
+          // Lange Analysen beginnen die Antwort früh (Status 200 als
+          // Heartbeat); scheitert die Rechnung danach, reist der Fehler
+          // im Body statt im Status.
+          if (payload && payload.error) {
+            throw new Error(payload.error);
+          }
+
           lastReport = payload;
           render(payload);
           setStatus('Analyse abgeschlossen.', false);

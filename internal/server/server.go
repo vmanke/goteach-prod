@@ -51,6 +51,13 @@ const maxVisits = 1000
 // defaultVisits gilt, wenn der Parameter visits fehlt.
 const defaultVisits = 50
 
+// keepAliveInterval ist der Abstand der Füllbytes, mit denen /analyze
+// lange Rechnungen am Leben hält — deutlich unter den ~60 Sekunden, nach
+// denen Proxys (konkret: der von Fly.io) Verbindungen ohne Datenfluss
+// kappen. KataGo rechnet je nach Partielänge Minuten und antwortet erst
+// am Ende; ohne Heartbeat sieht der Client einen Netzwerkfehler.
+const keepAliveInterval = 15 * time.Second
+
 // Run startet den HTTP-Dienst und blockiert bis zum Serverfehler.
 func Run() error {
 	// Secrets ausschließlich aus Umgebung/.env (nie als Flag).
@@ -328,90 +335,191 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	an, synthetic, err := startAnalyzer()
-
-	if err != nil {
-		httpError(w, http.StatusBadGateway, "KataGo-Start: %v", err)
-
-		return
-	}
-
-	defer func() {
-		if err := an.Close(); err != nil {
-			log.Printf("goteach-server: Analyzer schließen: %v", err)
-		}
-	}()
-
-	report, err := teaching.AnalyzeGame(game, an, opt)
-
-	if err != nil {
-		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
-		// kein internes Problem dieser Instanz.
-		if errors.Is(err, katago.ErrRemote) {
-			httpError(w, http.StatusBadGateway, "Remote-Engine: %v", err)
-
-			return
-		}
-
-		httpError(w, http.StatusInternalServerError, "Analyse: %v", err)
-
-		return
-	}
-
-	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts, ob dort
-	// eine echte Engine oder der Mock gerechnet hat.
-	if rm, ok := an.(*katago.Remote); ok {
-		synthetic = rm.Synthetic()
-	}
-
-	// Effektive Werte melden: Query-Parameter (opt) überschreiben die
-	// SGF-Werte – genau wie in teaching.Analyze für die Analyse verwendet.
-	effKomi := game.Komi
-
-	if opt.Komi != nil {
-		effKomi = *opt.Komi
-	}
-
-	effRules := game.Rules
-
-	if opt.Rules != "" {
-		effRules = opt.Rules
-	}
-
-	resp := analyzeResponse{
-		Size:      game.Size,
-		Komi:      effKomi,
-		Rules:     effRules,
-		Moves:     len(game.Moves),
-		Synthetic: synthetic,
-		Strands:   report.Strands,
-		Reports:   report.Moves,
-	}
-
 	// Kompaktformat für Clients ohne JSON-Parser (die Vereinshomepage
 	// rendert im wasm-Client): ein Datensatz je Zug, Felder mit US (0x1f),
 	// Datensätze mit RS (0x1e) getrennt — dieselbe Codec-Idee, die der
 	// Client auch für seine eigenen Inseln verwendet.
-	if strings.EqualFold(get("format"), "lines") {
-		writeLines(w, resp)
+	wantLines := strings.EqualFold(get("format"), "lines")
+
+	// Header vor der Rechnung festschreiben: beginnt der Heartbeat die
+	// Antwort, lassen sie sich nicht mehr ändern. Das Füllzeichen ist je
+	// Format eines, das jeder Leser überliest — Whitespace vor einem
+	// JSON-Wert ist gültiges JSON, leere Datensätze überspringt der
+	// Lines-Parser.
+	filler := "\n"
+
+	if wantLines {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+		filler = linesRecordSep
+	} else {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		if wantsDownload(get) {
+			w.Header().Set("Content-Disposition",
+				`attachment; filename="goteach-report.json"`)
+		}
+	}
+
+	resp, status, started, err := computeKeepingAlive(w, keepAliveInterval, filler,
+		func() (analyzeResponse, int, error) {
+			an, synthetic, err := startAnalyzer()
+
+			if err != nil {
+				return analyzeResponse{}, http.StatusBadGateway,
+					fmt.Errorf("KataGo-Start: %w", err)
+			}
+
+			defer func() {
+				if err := an.Close(); err != nil {
+					log.Printf("goteach-server: Analyzer schließen: %v", err)
+				}
+			}()
+
+			report, err := teaching.AnalyzeGame(game, an, opt)
+
+			if err != nil {
+				// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
+				// kein internes Problem dieser Instanz.
+				if errors.Is(err, katago.ErrRemote) {
+					return analyzeResponse{}, http.StatusBadGateway,
+						fmt.Errorf("Remote-Engine: %w", err)
+				}
+
+				return analyzeResponse{}, http.StatusInternalServerError,
+					fmt.Errorf("Analyse: %w", err)
+			}
+
+			// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
+			// ob dort eine echte Engine oder der Mock gerechnet hat.
+			if rm, ok := an.(*katago.Remote); ok {
+				synthetic = rm.Synthetic()
+			}
+
+			// Effektive Werte melden: Query-Parameter (opt) überschreiben
+			// die SGF-Werte – genau wie in teaching.Analyze verwendet.
+			effKomi := game.Komi
+
+			if opt.Komi != nil {
+				effKomi = *opt.Komi
+			}
+
+			effRules := game.Rules
+
+			if opt.Rules != "" {
+				effRules = opt.Rules
+			}
+
+			return analyzeResponse{
+				Size:      game.Size,
+				Komi:      effKomi,
+				Rules:     effRules,
+				Moves:     len(game.Moves),
+				Synthetic: synthetic,
+				Strands:   report.Strands,
+				Reports:   report.Moves,
+			}, http.StatusOK, nil
+		})
+
+	if err != nil {
+		if !started {
+			// Nichts gesendet: der Fehler bleibt ein echter HTTP-Status,
+			// exakt wie vor dem Heartbeat.
+			httpError(w, status, "%v", err)
+
+			return
+		}
+
+		// Status 200 und Füllbytes sind draußen; der Fehler kann nur noch
+		// im Body reisen. JSON-Leser prüfen "error", der Lines-Parser
+		// findet keinen Kopfsatz und meldet die Partie als unauswertbar.
+		if wantLines {
+			_, _ = io.WriteString(w, "E"+linesFieldSep+cleanRecordField(err.Error()))
+
+			return
+		}
+
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+
+		if err := enc.Encode(map[string]string{"error": err.Error()}); err != nil {
+			log.Printf("goteach-server: JSON-Antwort: %v", err)
+		}
 
 		return
 	}
 
-	if wantsDownload(get) {
-		w.Header().Set("Content-Disposition",
-			`attachment; filename="goteach-report.json"`)
+	if wantLines {
+		if !started {
+			w.WriteHeader(http.StatusOK)
+		}
+
+		_, _ = io.WriteString(w, linesBody(resp))
+
+		return
 	}
 
-	writeJSON(w, http.StatusOK, analyzeResponse{
-		Size:      game.Size,
-		Komi:      effKomi,
-		Rules:     effRules,
-		Moves:     len(game.Moves),
-		Synthetic: synthetic,
-		Strands:   report.Strands,
-		Reports:   report.Moves,
-	})
+	if !started {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+
+	if err := enc.Encode(resp); err != nil {
+		log.Printf("goteach-server: JSON-Antwort: %v", err)
+	}
+}
+
+// computeKeepingAlive führt compute aus. Dauert die Rechnung länger als
+// interval, beginnt die Antwort vorzeitig mit Status 200, und alle
+// interval geht ein Füllzeichen samt Flush hinaus, damit kein Proxy die
+// Verbindung als tot einstuft. started meldet, ob das passiert ist —
+// danach sind Status und Header festgeschrieben, und Fehler müssen im
+// Body transportiert werden. Der zurückgegebene Status stammt aus
+// compute und ist nur bei err != nil && !started von Belang.
+func computeKeepingAlive(
+	w http.ResponseWriter,
+	interval time.Duration,
+	filler string,
+	compute func() (analyzeResponse, int, error),
+) (resp analyzeResponse, status int, started bool, err error) {
+	type outcome struct {
+		resp   analyzeResponse
+		status int
+		err    error
+	}
+
+	done := make(chan outcome, 1)
+
+	go func() {
+		r, s, err := compute()
+		done <- outcome{r, s, err}
+	}()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case out := <-done:
+			return out.resp, out.status, started, out.err
+		case <-ticker.C:
+			if !started {
+				w.WriteHeader(http.StatusOK)
+
+				started = true
+			}
+
+			// Ein abgesprungener Client bricht nichts ab: die Rechnung
+			// läuft zu Ende, die Schreibfehler verpuffen.
+			_, _ = io.WriteString(w, filler)
+
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}
 }
 
 // Trennzeichen des Kompaktformats: US zwischen Feldern, RS zwischen
@@ -422,29 +530,32 @@ const (
 	linesRecordSep = "\x1e"
 )
 
-// writeLines schreibt die Analyse als Kompaktformat: ein Kopfsatz
+// cleanRecordField macht einen Text feldtauglich für das Kompaktformat:
+// Zeilenumbrüche und Tabs werden Leerzeichen, alle übrigen Steuerzeichen
+// (die beiden Trenner eingeschlossen) fallen weg.
+func cleanRecordField(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+
+		return r
+	}, s)
+}
+
+// linesBody baut die Analyse als Kompaktformat: ein Kopfsatz
 // H|size|komi|rules|moves|synthetic, dann je Zug ein Satz
 // M|number|player|coord|category|pointsLost|winrateBefore|winrateAfter|bestMove|text.
 // Zahlen mit fester Präzision, Text von Steuerzeichen befreit — der
 // Client darf splitten statt parsen.
-func writeLines(w http.ResponseWriter, resp analyzeResponse) {
-	clean := func(s string) string {
-		return strings.Map(func(r rune) rune {
-			if r == '\n' || r == '\t' {
-				return ' '
-			}
-
-			if r < 0x20 || r == 0x7f {
-				return -1
-			}
-
-			return r
-		}, s)
-	}
-
+func linesBody(resp analyzeResponse) string {
 	record := func(fields ...string) string {
 		for i, f := range fields {
-			fields[i] = clean(f)
+			fields[i] = cleanRecordField(f)
 		}
 
 		return strings.Join(fields, linesFieldSep)
@@ -481,9 +592,7 @@ func writeLines(w http.ResponseWriter, resp analyzeResponse) {
 		))
 	}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, strings.Join(records, linesRecordSep))
+	return strings.Join(records, linesRecordSep)
 }
 
 // startAnalyzer liefert die Engine dieser Instanz. Eine lokale Binary
