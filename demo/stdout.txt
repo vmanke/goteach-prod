@@ -1,46 +1,36 @@
 Keine Erzählstränge gefunden — die Partie verlief ohne erkennbar zusammenhängende Kämpfe.
 
 Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt] · ROSE E
-E wie Expansion: Um Q16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.
-Q16 liegt wie die Erstwahl A19 auf Stufe E.
 Schwarze Kette um Q16: Stärke 0.00 → 0.38.
 
 Zug 2 — Weiß D4 [ausgezeichnet, +14.2 Pkt] · ROSE E
-R geprüft: keine eigene Gruppe in Not — das Tenuki ist erlaubt.
-D4 liegt wie die Erstwahl Q18 auf Stufe E.
-Weiße Kette um D4: Stärke -0.00 → 0.38.
+Keine eigene Gruppe stand unter Druck; der Zug durfte woanders spielen.
+Weiße Kette um D4: Stärke 0.00 → 0.38.
 
 Zug 3 — Schwarz Q3 [ausgezeichnet, +11.9 Pkt] · ROSE E
-R geprüft: keine eigene Gruppe in Not — das Tenuki ist erlaubt.
-Q3 liegt wie die Erstwahl O16 auf Stufe E.
+Keine eigene Gruppe stand unter Druck; der Zug durfte woanders spielen.
 Schwarze Kette um Q3: Stärke -0.01 → 0.38.
 
 Zug 4 — Weiß D16 [ausgezeichnet, +12.6 Pkt] · ROSE E
-E wie Expansion: Um D16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.
-D16 liegt wie die Erstwahl G4 auf Stufe E.
-Weiße Kette um D16: Stärke -0.00 → 0.37.
+Weiße Kette um D16: Stärke 0.00 → 0.37.
 
 Zug 5 — Schwarz R9 [ausgezeichnet, +7.3 Pkt] · ROSE E
-R9 liegt wie die Erstwahl G16 auf Stufe E.
+Erstwahl der Engine: G16.
 
 Zug 6 — Weiß O17 [ausgezeichnet, +11.8 Pkt] · ROSE E
-O17 liegt wie die Erstwahl G16 auf Stufe E.
 Weiße Kette um O17: Stärke -0.28 → 0.09.
 
 Zug 7 — Schwarz Q14 [ausgezeichnet, +3.2 Pkt] · ROSE E
-Q14 liegt wie die Erstwahl P17 auf Stufe E.
-Form: Ein-Punkt-Sprung (Q16 Q14) — der Sprung über einen Punkt gilt als nie schlecht — er ist schnell und bleibt verbunden.
+Erstwahl der Engine: P17.
 
 Zug 8 — Weiß K16 [ausgezeichnet, +6.1 Pkt] · ROSE E
-E wie Endgame: Keine Gruppe in Not — jetzt zählt die exakte Punktgröße jedes Zuges.
-K16 liegt wie die Erstwahl P17 auf Stufe E.
+Erstwahl der Engine: P17.
 
 Zug 9 — Schwarz C14 [ausgezeichnet, +12.4 Pkt] · ROSE E
-C14 liegt wie die Erstwahl P17 auf Stufe E.
 Schwarze Kette um C14: Stärke -0.34 → 0.04.
 
 Zug 10 — Weiß C12 [ausgezeichnet, +6.6 Pkt] · ROSE E
-C12 liegt wie die Erstwahl P17 auf Stufe E.
+Erstwahl der Engine: P17.
 
 Zusammenfassung
 ---------------

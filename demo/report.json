@@ -26,11 +26,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "A19",
+          "visits": 1,
+          "winrate": 0.5,
+          "scoreLead": -7.5,
+          "pv": [
+            "A19"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "E wie Expansion: Um Q16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.\nQ16 liegt wie die Erstwahl A19 auf Stufe E.\nSchwarze Kette um Q16: Stärke 0.00 → 0.38."
+      "text": "Schwarze Kette um Q16: Stärke 0.00 → 0.38."
     },
     {
       "number": 2,
@@ -55,11 +66,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "Q18",
+          "visits": 1,
+          "winrate": 0.22509258382678887,
+          "scoreLead": -6.70729060405584,
+          "pv": [
+            "Q18"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "R geprüft: keine eigene Gruppe in Not — das Tenuki ist erlaubt.\nD4 liegt wie die Erstwahl Q18 auf Stufe E.\nWeiße Kette um D4: Stärke -0.00 → 0.38."
+      "text": "Keine eigene Gruppe stand unter Druck; der Zug durfte woanders spielen.\nWeiße Kette um D4: Stärke 0.00 → 0.38."
     },
     {
       "number": 3,
@@ -84,11 +106,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "O16",
+          "visits": 1,
+          "winrate": 0.49999999999999994,
+          "scoreLead": -7.500000000000001,
+          "pv": [
+            "O16"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "R geprüft: keine eigene Gruppe in Not — das Tenuki ist erlaubt.\nQ3 liegt wie die Erstwahl O16 auf Stufe E.\nSchwarze Kette um Q3: Stärke -0.01 → 0.38."
+      "text": "Keine eigene Gruppe stand unter Druck; der Zug durfte woanders spielen.\nSchwarze Kette um Q3: Stärke -0.01 → 0.38."
     },
     {
       "number": 4,
@@ -113,11 +146,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "G4",
+          "visits": 1,
+          "winrate": 0.2600617105391153,
+          "scoreLead": -4.392008107685378,
+          "pv": [
+            "G4"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "E wie Expansion: Um D16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.\nD16 liegt wie die Erstwahl G4 auf Stufe E.\nWeiße Kette um D16: Stärke -0.00 → 0.37."
+      "text": "Weiße Kette um D16: Stärke 0.00 → 0.37."
     },
     {
       "number": 5,
@@ -142,11 +186,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "G16",
+          "visits": 1,
+          "winrate": 0.48384972899412537,
+          "scoreLead": -8.218098245271579,
+          "pv": [
+            "G16"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "R9 liegt wie die Erstwahl G16 auf Stufe E."
+      "text": "Erstwahl der Engine: G16."
     },
     {
       "number": 6,
@@ -171,11 +226,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "G16",
+          "visits": 1,
+          "winrate": 0.3561282678494988,
+          "scoreLead": 0.8734083319756625,
+          "pv": [
+            "G16"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "O17 liegt wie die Erstwahl G16 auf Stufe E.\nWeiße Kette um O17: Stärke -0.28 → 0.09."
+      "text": "Weiße Kette um O17: Stärke -0.28 → 0.09."
     },
     {
       "number": 7,
@@ -200,11 +266,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "P17",
+          "visits": 1,
+          "winrate": 0.3854767565377811,
+          "scoreLead": -12.704288841060123,
+          "pv": [
+            "P17"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "Q14 liegt wie die Erstwahl P17 auf Stufe E.\nForm: Ein-Punkt-Sprung (Q16 Q14) — der Sprung über einen Punkt gilt als nie schlecht — er ist schnell und bleibt verbunden."
+      "text": "Erstwahl der Engine: P17."
     },
     {
       "number": 8,
@@ -229,11 +306,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "P17",
+          "visits": 1,
+          "winrate": 0.5440782130166937,
+          "scoreLead": 9.46533332454971,
+          "pv": [
+            "P17"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "E wie Endgame: Keine Gruppe in Not — jetzt zählt die exakte Punktgröße jedes Zuges.\nK16 liegt wie die Erstwahl P17 auf Stufe E."
+      "text": "Erstwahl der Engine: P17."
     },
     {
       "number": 9,
@@ -258,11 +346,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "P17",
+          "visits": 1,
+          "winrate": 0.32780147059979403,
+          "scoreLead": -15.563524968703852,
+          "pv": [
+            "P17"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "C14 liegt wie die Erstwahl P17 auf Stufe E.\nSchwarze Kette um C14: Stärke -0.34 → 0.04."
+      "text": "Schwarze Kette um C14: Stärke -0.34 → 0.04."
     },
     {
       "number": 10,
@@ -287,11 +386,22 @@
           "new": true
         }
       ],
+      "alternatives": [
+        {
+          "move": "P17",
+          "visits": 1,
+          "winrate": 0.40319082115252736,
+          "scoreLead": 3.1290858952595855,
+          "pv": [
+            "P17"
+          ]
+        }
+      ],
       "rose": {
         "played": "E",
         "best": "E"
       },
-      "text": "C12 liegt wie die Erstwahl P17 auf Stufe E."
+      "text": "Erstwahl der Engine: P17."
     }
   ]
 }

@@ -1,6 +1,7 @@
 package teaching
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/vmanke/goteach-prod/board"
@@ -277,8 +278,9 @@ func TestTacticOn(t *testing.T) {
 	}
 }
 
-// Der Lehrsatz eines Motivs wandert wörtlich in den O-Befundsatz.
-func TestBefundSentenceUsesTacticTeaching(t *testing.T) {
+// Der Lehrsatz eines gelesenen Motivs wandert wörtlich in den Befund —
+// er stammt aus exakter Variantensuche und ist damit belegt.
+func TestDemandSentenceUsesTacticTeaching(t *testing.T) {
 	f := &roseFinding{
 		bucket: roseO,
 		rep:    "Q10",
@@ -290,12 +292,40 @@ func TestBefundSentenceUsesTacticTeaching(t *testing.T) {
 		},
 	}
 
-	got := befundSentence(f, "")
+	got := demandSentence(f, "")
 
-	want := "O wie Offense: Leiter gegen die weiße Kette um Q10 — die " +
-		"Leiter läuft für Schwarz — jeder Fluchtzug endet im Atari."
+	want := "Die weiße Kette um Q10 stand in einem Leiter: die Leiter läuft " +
+		"für Schwarz — jeder Fluchtzug endet im Atari."
 
 	if got != want {
 		t.Fatalf("Befundsatz:\n%q\nerwartet:\n%q", got, want)
+	}
+}
+
+// Ein Befund ohne Motiv nennt die Zahlen, die ihn tragen — und verzichtet
+// auf Etikett und Wertung.
+func TestDemandSentenceCarriesItsNumbers(t *testing.T) {
+	f := &roseFinding{
+		bucket:   roseO,
+		rep:      "Q10",
+		color:    "Weiß",
+		libs:     3,
+		strength: -0.001,
+	}
+
+	got := demandSentence(f, "")
+
+	if !strings.Contains(got, "3 Freiheiten") {
+		t.Errorf("Freiheiten fehlen: %q", got)
+	}
+
+	if strings.Contains(got, "-0.00") {
+		t.Errorf("negative Null im Befund: %q", got)
+	}
+
+	for _, banned := range []string{"O wie", "schwach", "dringlichste"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("Befund trägt %q: %q", banned, got)
+		}
 	}
 }

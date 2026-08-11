@@ -1,6 +1,18 @@
-// Die deutschen Bausteine der ROSE-Texte. Alles Prosa hier ist Template —
-// jede Zahl, jede Koordinate, jeder Ketten-Bezug kommt aus verifizierten
-// Befunden (rose.go). Stil: nüchtern, Sie-Form, keine Floskeln.
+// Die deutschen Sätze der Lehreinheiten.
+//
+// Drei Regeln, aus denen alles Weitere folgt:
+//
+//  1. Kein Satz ohne Beleg. Jede Behauptung nennt die Zahl, die sie trägt —
+//     Freiheiten, Stärke, Punkte, Koordinaten. Was sich nicht belegen lässt,
+//     wird nicht gesagt. Deshalb steht hier nirgends, das Brett sei "noch
+//     offen" oder ein Zug "solide": Das wäre geraten, und geraten klingt
+//     genau wie erfunden.
+//  2. Keine Sprichwörter. Eine Go-Weisheit, die an jede Karte passt, sagt
+//     über DIESEN Zug nichts. Statt einer Merkregel steht da, was der Zug
+//     gekostet hat und was die Engine stattdessen gerechnet hat.
+//  3. Keine Etiketten im Fließtext. Die ROSE-Stufe steht als Feld in den
+//     Daten; sie muss nicht in jedem zweiten Satz als "R wie Respond:"
+//     angekündigt werden.
 package teaching
 
 import (
@@ -8,8 +20,8 @@ import (
 	"strings"
 )
 
-// adjColor macht aus "Schwarz"/"Weiß" das kleingeschriebene Adjektiv für
-// die Satzmitte.
+// adjColor macht aus "Schwarz"/"Weiß" das kleingeschriebene Adjektiv im
+// Nominativ ("die schwarze Kette").
 func adjColor(name string) string {
 	if name == "Schwarz" {
 		return "schwarze"
@@ -18,126 +30,86 @@ func adjColor(name string) string {
 	return "weiße"
 }
 
-// befundSentence formuliert den dringlichsten Befund der Stellung.
-func befundSentence(f *roseFinding, prevCoord string) string {
+// adjColorDative ist dasselbe Adjektiv im Dativ ("der schwarzen Kette").
+// Eigene Funktion, weil ein falscher Kasus einen sonst sauberen Satz
+// sofort nach Maschine klingen lässt.
+func adjColorDative(name string) string {
+	return adjColor(name) + "n"
+}
+
+// demandSentence beschreibt, was die Stellung VOR dem Zug verlangte —
+// immer mit den Zahlen, die den Befund tragen.
+func demandSentence(f *roseFinding, prevCoord string) string {
 	switch f.bucket {
 	case roseR:
 		if f.tactic != nil {
-			return fmt.Sprintf(
-				"R wie Respond: %s gegen die %s Kette um %s — %s",
-				f.tactic.Name, adjColor(f.color), f.rep,
+			// Der Lehrsatz des Motivs stammt aus exakter Lesearbeit
+			// (shapes/reading.go), nicht aus einer Faustregel.
+			return fmt.Sprintf("Die %s Kette um %s stand in einem %s: %s",
+				adjColor(f.color), f.rep, f.tactic.Name,
 				lowerFirst(f.tactic.Teaching))
 		}
 
 		if f.atari {
 			if prevCoord != "" {
 				return fmt.Sprintf(
-					"R wie Respond: Der letzte Zug (%s) setzt die %s Kette um "+
-						"%s ins Atari — eine lokale Antwort ist zwingend.",
+					"%s setzte die %s Kette um %s ins Atari — eine Freiheit blieb.",
 					prevCoord, adjColor(f.color), f.rep)
 			}
 
 			return fmt.Sprintf(
-				"R wie Respond: Die %s Kette um %s steht im Atari — eine "+
-					"lokale Antwort ist zwingend.", adjColor(f.color), f.rep)
+				"Die %s Kette um %s stand im Atari — eine Freiheit blieb.",
+				adjColor(f.color), f.rep)
 		}
 
 		return fmt.Sprintf(
-			"R wie Respond: Der letzte Zug (%s) bedroht die %s Kette um %s "+
-				"(%d Freiheiten, Stärke %.2f) — erst die Not klären.",
-			prevCoord, adjColor(f.color), f.rep, f.libs, noNegZero(f.strength))
+			"%s nahm der %s Kette um %s Luft: %d Freiheiten, Stärke %.2f.",
+			prevCoord, adjColorDative(f.color), f.rep, f.libs,
+			noNegZero(f.strength))
 
 	case roseO:
 		if f.tactic != nil {
-			return fmt.Sprintf(
-				"O wie Offense: %s gegen die %s Kette um %s — %s",
-				f.tactic.Name, adjColor(f.color), f.rep,
+			return fmt.Sprintf("Die %s Kette um %s stand in einem %s: %s",
+				adjColor(f.color), f.rep, f.tactic.Name,
 				lowerFirst(f.tactic.Teaching))
 		}
 
 		return fmt.Sprintf(
-			"O wie Offense: Die %s Kette um %s ist schwach (%d Freiheiten, "+
-				"Stärke %.2f) — Angriff oder Trennung ist der dringlichste Zug.",
+			"Die %s Kette um %s hatte %d Freiheiten und Stärke %.2f.",
 			adjColor(f.color), f.rep, f.libs, noNegZero(f.strength))
 
 	default: // roseS
 		return fmt.Sprintf(
-			"S wie Status: Die eigene Kette um %s steht schwach (%d "+
-				"Freiheiten, Stärke %.2f) — erst verstärken, dann expandieren.",
+			"Die eigene Kette um %s hatte %d Freiheiten und Stärke %.2f.",
 			f.rep, f.libs, noNegZero(f.strength))
 	}
 }
 
-// eSentence formuliert den E-Befund einer Stellung ohne dringlichere Fragen.
-func eSentence(d *roseDetail, coord string) string {
-	switch {
-	case d.phase == "Endspiel":
-		return "E wie Endgame: Keine Gruppe in Not — jetzt zählt die exakte " +
-			"Punktgröße jedes Zuges."
-
-	case d.openArea && coord != "":
-		return fmt.Sprintf(
-			"E wie Expansion: Um %s ist das Brett noch offen — solange nichts "+
-				"drängt, ist der größte freie Raum der Maßstab.", coord)
-
-	default:
-		return "E wie Expansion: Keine dringende Gruppe auf dem Brett — es " +
-			"entscheidet die Größe des Punktes."
-	}
-}
-
-const tenukiSentence = "R geprüft: keine eigene Gruppe in Not — das Tenuki " +
-	"ist erlaubt."
-
-// bucketClaim benennt, was ein Zug auf einer Stufe tut — für die
-// Urteilssätze.
-func bucketClaim(bucket int, f *roseFinding, prevCoord string) string {
-	switch bucket {
-	case roseR:
-		if prevCoord != "" {
-			return "R (Antwort auf " + prevCoord + ")"
-		}
-
-		return "R (lokale Antwort)"
-
-	case roseO:
-		if f != nil {
-			return "O (Angriff um " + f.rep + ")"
-		}
-
-		return "O (Angriff)"
-
-	case roseS:
-		if f != nil {
-			return "S (Verstärkung um " + f.rep + ")"
-		}
-
-		return "S (Verstärkung)"
-
-	default:
-		return "E (großer Punkt)"
-	}
-}
-
-// findingOf liefert den ersten Befund einer Stufe.
-func findingOf(findings []roseFinding, bucket int) *roseFinding {
-	for i := range findings {
-		if findings[i].bucket == bucket {
-			return &findings[i]
-		}
-	}
-
-	return nil
-}
-
-// variantSuffix hängt die Engine-Variante an, wenn sie mehr als den ersten
-// Zug enthält.
-func variantSuffix(pv []string) string {
-	if len(pv) <= 1 {
+// variationSentence spricht die gerechnete Fortsetzung aus. Sie ist der
+// eigentliche Lehrstoff bei einem Fehler: nicht DASS ein Zug besser war,
+// sondern wie es weitergegangen wäre.
+func variationSentence(lead string, pv []string) string {
+	if len(pv) < 2 {
 		return ""
 	}
 
-	return " (Variante: " + strings.Join(pv, " ") + ")"
+	return fmt.Sprintf("%s rechnet die Engine weiter mit %s.",
+		lead, strings.Join(pv[1:], " "))
+}
+
+// costSentence nennt den Preis des Zuges und die Erstwahl. cost ist der
+// Abstand zur Erstwahl in Punkten, aus Sicht des Ziehenden.
+func costSentence(coord, best string, cost float64) string {
+	return fmt.Sprintf("%s kostet %.1f Punkte gegenüber %s.",
+		coord, cost, best)
+}
+
+// unconsideredSentence gilt, wenn die Engine den gespielten Zug gar nicht
+// erst gerechnet hat — bei einer breiten Suche eine Aussage für sich.
+func unconsideredSentence(coord string, visits int) string {
+	return fmt.Sprintf(
+		"%s stand nicht unter den %d Zügen, die die Engine geprüft hat.",
+		coord, visits)
 }
 
 // lowerFirst senkt den ersten Buchstaben eines Satzes für die Satzmitte.
@@ -153,29 +125,13 @@ func lowerFirst(s string) string {
 	return first + string(r[1:])
 }
 
-// Abschluss-Sätze je Stufe: zwei Formulierungen, jede höchstens zweimal je
-// Partie — danach bewusst Stille statt Floskel.
-var closers = map[int][]string{
-	roseR: {
-		"Erst die Not klären, dann der große Punkt — eine Gruppe im Atari " +
-			"kostet mehr als jedes Gebiet.",
-		"Freiheiten vor dem Setzen zählen, nicht danach.",
-	},
-	roseO: {
-		"Schwache Gruppen greift man mit Abstand an — der Profit entsteht " +
-			"beim Jagen, nicht beim Berühren.",
-		"Trennen ist oft stärker als Umzingeln: getrennte Gruppen müssen " +
-			"zweimal leben.",
-	},
-	roseS: {
-		"Eine Basis mit Augenraum ist der billigste Zug der Partie — " +
-			"solange sie noch freiwillig ist.",
-		"Stabilität der eigenen Gruppen geht vor Territorium.",
-	},
-	roseE: {
-		"Der größte Punkt liegt dort, wo beide Seiten expandieren können — " +
-			"wer zuerst kommt, nimmt beide Richtungen.",
-		"Im Endspiel zählt Sente: erst die Züge, die der Gegner beantworten " +
-			"muss.",
-	},
+// upperFirst hebt den ersten Buchstaben für den Satzanfang.
+func upperFirst(s string) string {
+	r := []rune(s)
+
+	if len(r) == 0 {
+		return s
+	}
+
+	return strings.ToUpper(string(r[0])) + string(r[1:])
 }
