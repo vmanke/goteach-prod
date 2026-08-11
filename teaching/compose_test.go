@@ -1,6 +1,7 @@
 package teaching
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestComposeDedupWindow(t *testing.T) {
 
 	composeTexts(reports)
 
-	if got := countLines(reports, "O wie Offense"); got != 3 {
+	if got := countLines(reports, "Kette um G7 hatte"); got != 3 {
 		t.Fatalf("O-Befund %d-mal genannt, erwartet 3 (Fenster %d)",
 			got, dedupWindow)
 	}
@@ -97,7 +98,7 @@ func TestComposeAtariNeverSuppressed(t *testing.T) {
 
 	composeTexts(reports)
 
-	if got := countLines(reports, "R wie Respond"); got != 4 {
+	if got := countLines(reports, "im Atari"); got != 4 {
 		t.Fatalf("R-Atari-Befund %d-mal genannt, erwartet 4", got)
 	}
 }
@@ -127,7 +128,7 @@ func TestComposeGoldenRuleSpacing(t *testing.T) {
 	var goldenAt []int
 
 	for _, r := range reports {
-		if strings.Contains(r.Text, "Merkregel: Dringlichkeit geht vor Größe") {
+		if strings.Contains(r.Text, "Dringlichkeit geht vor Größe") {
 			goldenAt = append(goldenAt, r.Number)
 		}
 	}
@@ -143,11 +144,11 @@ func TestComposeGoldenRuleSpacing(t *testing.T) {
 		}
 	}
 
-	// Ohne Regel bleibt der Vergleich trotzdem in jedem Text.
+	// Auch ohne die Regel steht in jedem Text der Gegenvorschlag: Ein Zug,
+	// der Punkte kostet, wird nie kommentarlos stehen gelassen.
 	for _, r := range reports {
-		if !strings.Contains(r.Text, "Erstwahl") &&
-			!strings.Contains(r.Text, "Merkregel") {
-			t.Fatalf("Zug %d ohne Urteil:\n%s", r.Number, r.Text)
+		if !strings.Contains(r.Text, "E6") {
+			t.Fatalf("Zug %d nennt die Erstwahl nicht:\n%s", r.Number, r.Text)
 		}
 	}
 }
@@ -172,31 +173,9 @@ func TestComposeGoldenRuleSeverityOverridesGap(t *testing.T) {
 
 	composeTexts(reports)
 
-	if got := countLines(reports, "Merkregel:"); got != 2 {
+	if got := countLines(reports, "Dringlichkeit geht vor Größe"); got != 2 {
 		t.Fatalf("goldene Regel %d-mal, erwartet 2 (Kategorie bricht Abstand)",
 			got)
-	}
-}
-
-// Abschluss-Formulierungen: jede höchstens zweimal, danach Stille.
-func TestComposeCloserPools(t *testing.T) {
-	reports := make([]MoveReport, 0, 12)
-
-	for i := 0; i < 12; i++ {
-		reports = append(reports, mkReport(i+1, "K10", "Ungenauigkeit",
-			RoseFacts{Played: "E"},
-			roseDetail{bucketBest: -1}))
-	}
-
-	composeTexts(reports)
-
-	for _, pool := range closers {
-		for _, closer := range pool {
-			if got := countLines(reports, closer); got > closerMaxUse {
-				t.Fatalf("Abschluss %q %d-mal, erlaubt %d",
-					closer, got, closerMaxUse)
-			}
-		}
 	}
 }
 
@@ -224,11 +203,11 @@ func TestComposePassTexts(t *testing.T) {
 	reports := []MoveReport{urgent, quiet1, quiet2}
 	composeTexts(reports)
 
-	if !strings.Contains(reports[0].Text, "Passen, während") {
+	if !strings.Contains(reports[0].Text, "Pass, während") {
 		t.Fatalf("Pass unter Not ohne Alarm:\n%s", reports[0].Text)
 	}
 
-	if !strings.Contains(reports[1].Text, "Pass — vertretbar") {
+	if !strings.Contains(reports[1].Text, "keinen Zug mehr") {
 		t.Fatalf("erster ruhiger Pass ohne Einordnung:\n%s", reports[1].Text)
 	}
 
@@ -248,9 +227,9 @@ func TestChainProseGates(t *testing.T) {
 			UncondAlive: true, UncondAliveBefore: false},
 	}}
 
-	if got := chainProse(r); len(got) != maxChainProse {
+	if got := chainProse(r, ""); len(got) != 2 {
 		t.Fatalf("%d Ketten-Sätze, erwartet Kappung bei %d: %v",
-			len(got), maxChainProse, got)
+			len(got), 2, got)
 	}
 
 	drift := &MoveReport{Effects: []GroupEffect{
@@ -258,7 +237,7 @@ func TestChainProseGates(t *testing.T) {
 			StrengthBefore: 0.30, StrengthAfter: 0.40},
 	}}
 
-	if got := chainProse(drift); len(got) != 0 {
+	if got := chainProse(drift, ""); len(got) != 0 {
 		t.Fatalf("Stärke-Drift 0.10 erzeugt Prosa: %v", got)
 	}
 
@@ -267,7 +246,7 @@ func TestChainProseGates(t *testing.T) {
 			StrengthBefore: 0.10, StrengthAfter: 0.40},
 	}}
 
-	if got := chainProse(jump); len(got) != 1 {
+	if got := chainProse(jump, ""); len(got) != 1 {
 		t.Fatalf("Stärkesprung 0.30 ohne Prosa: %v", got)
 	}
 
@@ -276,7 +255,7 @@ func TestChainProseGates(t *testing.T) {
 			StrengthBefore: 0.2, StrengthAfter: 0.2},
 	}}
 
-	if got := chainProse(lowLibs); len(got) != 1 {
+	if got := chainProse(lowLibs, ""); len(got) != 1 {
 		t.Fatalf("2 Freiheiten ohne Prosa: %v", got)
 	}
 
@@ -286,7 +265,7 @@ func TestChainProseGates(t *testing.T) {
 			StrengthBefore: 0.9, StrengthAfter: 0.9},
 	}}
 
-	if got := chainProse(alreadyAlive); len(got) != 0 {
+	if got := chainProse(alreadyAlive, ""); len(got) != 0 {
 		t.Fatalf("Benson ohne Übergang erzeugt Prosa: %v", got)
 	}
 }
@@ -331,7 +310,7 @@ func TestChainProseHasNoNegativeZero(t *testing.T) {
 			StrengthBefore: -0.0004, StrengthAfter: 0.38},
 	}}
 
-	got := chainProse(r)
+	got := chainProse(r, "")
 
 	if len(got) != 1 {
 		t.Fatalf("%d Sätze, erwartet 1: %v", len(got), got)
@@ -339,5 +318,126 @@ func TestChainProseHasNoNegativeZero(t *testing.T) {
 
 	if strings.Contains(got[0], "-0.00") {
 		t.Fatalf("negative Null im Text: %q", got[0])
+	}
+}
+
+// Ein grober Fehler bekommt die ganze Rechnung, ein guter Zug eine Zeile.
+// Genau dieses Gefälle fehlte vorher: Beide bekamen gleich viel Text, und
+// dadurch war er beim guten Zug zu viel und beim Fehler zu wenig.
+func TestTextDepthFollowsSeverity(t *testing.T) {
+	facts := RoseFacts{Played: "E", Best: "R", Urgent: true}
+	detail := roseDetail{
+		bucketBest: roseR,
+		prevCoord:  "D5",
+		findings: []roseFinding{{
+			bucket: roseR, rep: "D5", color: "Schwarz",
+			stones: 2, libs: 1, atari: true,
+		}},
+	}
+
+	build := func(category string) MoveReport {
+		rep := mkReport(1, "K10", category, facts, detail)
+		rep.BestMove = "E6"
+		rep.BestPV = []string{"E6", "D6", "C5", "D4"}
+		rep.Played = &Candidate{
+			Move: "K10", Visits: 40, ScoreLead: -4.0,
+			PV: []string{"K10", "E5", "F5"},
+		}
+		rep.Alternatives = []Candidate{
+			{Move: "E6", Visits: 300, ScoreLead: 2.5,
+				PV: []string{"E6", "D6", "C5"}},
+		}
+
+		return rep
+	}
+
+	lines := func(category string) int {
+		reports := []MoveReport{build(category)}
+		composeTexts(reports)
+
+		return len(strings.Split(reports[0].Text, "\n"))
+	}
+
+	good := lines("gut")
+	blunder := lines("grober Fehler")
+
+	if blunder <= good {
+		t.Fatalf("grober Fehler %d Zeilen, guter Zug %d — kein Gefälle",
+			blunder, good)
+	}
+
+	// Beim groben Fehler gehört die gerechnete Fortsetzung dazu, nicht nur
+	// der Name des besseren Zuges.
+	reports := []MoveReport{build("grober Fehler")}
+	composeTexts(reports)
+	text := reports[0].Text
+
+	for _, want := range []string{"E6", "D6 C5 D4", "Punkte"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Text zum groben Fehler ohne %q:\n%s", want, text)
+		}
+	}
+}
+
+// Der Preis kommt aus EINER Suche: Abstand des gespielten Zuges zur
+// Erstwahl in der Kandidatenliste, nicht aus der Differenz zweier Suchen.
+func TestEngineCostComesFromTheCandidateList(t *testing.T) {
+	rep := mkReport(1, "K10", "Fehler",
+		RoseFacts{Played: "E"}, roseDetail{bucketBest: -1})
+	rep.BestMove = "E6"
+	rep.Played = &Candidate{Move: "K10", ScoreLead: -1.5}
+	rep.Alternatives = []Candidate{{Move: "E6", ScoreLead: 2.0}}
+
+	cost, ok := engineCost(&rep)
+
+	if !ok || math.Abs(cost-3.5) > 0.001 {
+		t.Fatalf("Kosten = %.2f (ok=%t), erwartet 3.50", cost, ok)
+	}
+
+	// Ohne Kandidaten zum gespielten Zug gibt es keinen Wert — und dann
+	// wird auch keiner behauptet.
+	rep.Played = nil
+
+	if _, ok := engineCost(&rep); ok {
+		t.Fatal("Kosten ohne Kandidaten behauptet")
+	}
+}
+
+// Die Texte dürfen weder Sprichwörter noch Etiketten noch Behauptungen
+// ohne Beleg tragen — daran war der alte Stand als KI-Sprech erkennbar.
+func TestTextsCarryNoProverbsOrLabels(t *testing.T) {
+	g, err := board.ParseSGF(demoSGF)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reports, err := Analyze(g, katago.Mock{}, Options{Visits: 1, Tau: 3.0})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	banned := []string{
+		// Etiketten im Fließtext.
+		"R wie", "O wie", "S wie", "E wie", "ROSE-Stufe",
+		// Sprichwörter und Merksätze ohne Bezug zu dieser Stellung.
+		"Merksatz", "gilt als nie schlecht", "geht vor Territorium",
+		"zweimal leben", "wer zuerst kommt",
+		// Behauptungen, die keine Zahl belegt.
+		"Solide", "das Brett noch offen", "solange nichts drängt",
+		"es entscheidet die Größe",
+	}
+
+	for _, r := range reports {
+		for _, phrase := range banned {
+			if strings.Contains(r.Text, phrase) {
+				t.Errorf("Zug %d trägt %q:\n%s", r.Number, phrase, r.Text)
+			}
+		}
+
+		if strings.TrimSpace(r.Text) == "" {
+			t.Errorf("Zug %d ohne Text", r.Number)
+		}
 	}
 }

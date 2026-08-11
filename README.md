@@ -81,8 +81,6 @@ Beispielausgabe (aus der **Mock**-Demo; Zahlen daher synthetisch):
 Keine Erzählstränge gefunden — die Partie verlief ohne erkennbar zusammenhängende Kämpfe.
 
 Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt] · ROSE E
-E wie Expansion: Um Q16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.
-Q16 liegt wie die Erstwahl A19 auf Stufe E.
 Schwarze Kette um Q16: Stärke 0.00 → 0.38.
 
 Zusammenfassung
@@ -580,12 +578,25 @@ Mit `-moves` lässt sich der Feinschliff pro Zug weiterhin dazuschalten.
   werden gegen dieselben Befunde eingestuft; spielt der Zug eine weniger
   dringliche Stufe als die Erstwahl, nennt der Text die goldene Regel
   „Dringlichkeit geht vor Größe".
+- Belegpflicht: Jeder Satz nennt die Zahl, die ihn trägt — Freiheiten,
+  Stärke, Punkte, Koordinaten. Was sich nicht belegen lässt, steht nicht
+  da; deshalb gibt es keine Sprichwörter, keine Etiketten im Fließtext
+  ("R wie Respond:") und keine Wertung ohne Messwert.
+- Länge nach Gewicht (`sentenceBudget`): ausgezeichnet 2 Sätze, gut 3,
+  Ungenauigkeit 4, Fehler 6, grober Fehler 8. Ein guter Zug braucht keine
+  Erklärung, ein grober Fehler die ganze Rechnung — Preis, Erstwahl und
+  beide gerechneten Fortsetzungen (die der Erstwahl und die des
+  gespielten Zuges).
+- Der Preis kommt aus EINER Suche: Abstand des gespielten Zuges zur
+  Erstwahl in der Kandidatenliste (`played`/`alternatives` im JSON).
+  `pointsLost` setzt dagegen zwei getrennte Suchen voneinander ab und
+  trägt deren Rauschen mit.
 - Wiederholungs-Unterdrückung (compose.go, ein Pass über die Partie):
-  gleicher Befund schweigt 5 Züge (R-Atari nie), goldene Regel mit
-  mindestens 8 Zügen Abstand (außer ab Kategorie „Fehler"),
-  Abschluss-Formulierungen je 2× pro Partie, Ketten-Sätze nur bei
-  Ereignis (Schlagen, Atari, Benson-Übergang, |ΔStärke| ≥ 0.25,
-  ≤ 2 Freiheiten); die JSON-Effects bleiben immer vollständig.
+  gleicher Befund schweigt 5 Züge (R-Atari nie), die goldene Regel hält
+  mindestens 8 Züge Abstand (außer ab Kategorie „Fehler"), Ketten-Sätze
+  nur bei Ereignis (Schlagen, Atari, Benson-Übergang, |ΔStärke| ≥ 0.25,
+  ≤ 2 Freiheiten) und nie über die Kette, die der Befund gerade behandelt
+  hat; die JSON-Effects bleiben immer vollständig.
 
 ## Teststand
 

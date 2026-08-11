@@ -72,6 +72,21 @@ type GroupEffect struct {
 	UncondAliveBefore bool `json:"uncondAliveBefore,omitempty"`
 }
 
+// Candidate ist ein von der Engine gerechneter Zug samt Bewertung und
+// Fortsetzung — alle Zahlen aus Sicht des Ziehenden.
+//
+// Der Kandidat zum GESPIELTEN Zug ist das wertvollste Stück: Er sagt, was
+// die Engine an dieser Stelle erwartet hätte, und sein Abstand zur
+// Erstwahl ist der Preis des Zuges, gerechnet in einer Suche statt
+// zusammengesetzt aus zwei.
+type Candidate struct {
+	Move      string   `json:"move"`
+	Visits    int      `json:"visits"`
+	Winrate   float64  `json:"winrate"`
+	ScoreLead float64  `json:"scoreLead"`
+	PV        []string `json:"pv,omitempty"`
+}
+
 // MoveReport ist die Lehreinheit zu genau einem Zug.
 type MoveReport struct {
 	Number        int           `json:"number"`
@@ -85,6 +100,13 @@ type MoveReport struct {
 	BestMove      string        `json:"bestMove,omitempty"`
 	BestPV        []string      `json:"bestPV,omitempty"`
 	Effects       []GroupEffect `json:"effects,omitempty"`
+	// Played ist die Bewertung des gespielten Zuges durch die Engine —
+	// nil, wenn sie ihn nicht in Betracht gezogen hat (dann sagt schon
+	// das etwas).
+	Played *Candidate `json:"played,omitempty"`
+	// Alternatives sind die nächstbesten Züge der Engine ohne den
+	// gespielten, stärkster zuerst.
+	Alternatives []Candidate `json:"alternatives,omitempty"`
 	// Rose ist die Einstufung des Zuges in die ROSE-Checkliste (rose.go).
 	Rose    *RoseFacts `json:"rose,omitempty"`
 	Text    string     `json:"text"`
@@ -129,55 +151,14 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 	}
 
 	n := len(g.Moves)
-	from := opt.From
-
-	if from < 1 {
-		from = 1
-	}
-
-	to := opt.To
-
-	if to < from || to > n {
-		to = n
-	}
 
 	if n == 0 {
 		return nil, fmt.Errorf("teaching: Partie enthält keine Züge")
 	}
 
-	req := katago.Request{
-		Rules:     rulesString(g.Rules, opt.Rules),
-		Komi:      g.Komi,
-		Size:      g.Size,
-		MaxVisits: opt.Visits,
-	}
-
-	if opt.Komi != nil {
-		req.Komi = *opt.Komi
-	}
-
-	for _, s := range g.Setup {
-		req.InitialStones = append(req.InitialStones,
-			[2]string{s.Color.String(), board.ToGTP(s.Point, g.Size)})
-	}
-
-	for _, m := range g.Moves {
-		coord := "pass"
-
-		if !m.Pass {
-			coord = board.ToGTP(m.Point, g.Size)
-		}
-
-		req.Moves = append(req.Moves, [2]string{m.Color.String(), coord})
-	}
-
-	// Eine Query, Stellungen from-1 .. to (jeweils "vor Zug i" und "nach
-	// letztem Zug"): Anzahl Analysen = (to-from)+2.
-	turns := make([]int, 0, to-from+2)
-
-	for t := from - 1; t <= to; t++ {
-		turns = append(turns, t)
-	}
+	from, to := moveRange(opt, n)
+	req := analysisRequest(g, opt)
+	turns := analysisTurns(from, to)
 
 	if opt.Progress {
 		fmt.Fprintf(os.Stderr,
@@ -334,6 +315,68 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 	return report, nil
 }
 
+// moveRange normiert From/To auf einen gültigen Zugbereich 1..n.
+func moveRange(opt Options, n int) (from, to int) {
+	from = opt.From
+
+	if from < 1 {
+		from = 1
+	}
+
+	to = opt.To
+
+	if to < from || to > n {
+		to = n
+	}
+
+	return from, to
+}
+
+// analysisRequest baut die Engine-Anfrage zur Partie. Eine Definition für
+// Sammel- und Stromweg: die beiden dürfen sich in der Anfrage nicht
+// unterscheiden, sonst rechneten sie an verschiedenen Partien.
+func analysisRequest(g *board.Game, opt Options) katago.Request {
+	req := katago.Request{
+		Rules:     rulesString(g.Rules, opt.Rules),
+		Komi:      g.Komi,
+		Size:      g.Size,
+		MaxVisits: opt.Visits,
+	}
+
+	if opt.Komi != nil {
+		req.Komi = *opt.Komi
+	}
+
+	for _, s := range g.Setup {
+		req.InitialStones = append(req.InitialStones,
+			[2]string{s.Color.String(), board.ToGTP(s.Point, g.Size)})
+	}
+
+	for _, m := range g.Moves {
+		coord := "pass"
+
+		if !m.Pass {
+			coord = board.ToGTP(m.Point, g.Size)
+		}
+
+		req.Moves = append(req.Moves, [2]string{m.Color.String(), coord})
+	}
+
+	return req
+}
+
+// analysisTurns listet die Stellungen from-1 .. to — je Zug die davor und
+// die danach, also (to-from)+2 Analysen.
+func analysisTurns(from, to int) []int {
+	turns := make([]int, 0, to-from+2)
+
+	for t := from - 1; t <= to; t++ {
+		turns = append(turns, t)
+	}
+
+	return turns
+}
+
 func buildReport(i int, mv board.Move, prev *board.Move, size, total int,
 	bb, ab *board.Board, before, after *katago.Result, tau float64) MoveReport {
 
@@ -371,6 +414,8 @@ func buildReport(i int, mv board.Move, prev *board.Move, size, total int,
 		rep.BestPV = limit(best.PV, 6)
 	}
 
+	rep.Played, rep.Alternatives = candidates(before, rep.Coord, persp, sign)
+
 	// EqualFold, weil rep.Coord bei Pass "Pass" ist, KataGo aber "pass"
 	// liefert; für gewöhnliche GTP-Koordinaten deckungsgleich mit ==.
 	matchesBest := rep.BestMove != "" &&
@@ -390,6 +435,57 @@ func buildReport(i int, mv board.Move, prev *board.Move, size, total int,
 		total, rep.Number)
 
 	return rep
+}
+
+// maxAlternatives begrenzt die genannten Gegenvorschläge. Mehr als zwei
+// liest niemand nach, und die Engine sortiert ohnehin scharf.
+const maxAlternatives = 2
+
+// candidates zieht die Engine-Kandidaten auf die Sicht des Ziehenden um
+// und trennt den gespielten Zug von den Alternativen. Die Reihenfolge der
+// Engine (order) bleibt erhalten: sie ist ihr Urteil, nicht unseres.
+func candidates(before *katago.Result, coord string,
+	persp func(float64) float64, sign float64) (*Candidate, []Candidate) {
+
+	infos := make([]katago.MoveInfo, len(before.MoveInfos))
+	copy(infos, before.MoveInfos)
+
+	sort.SliceStable(infos, func(a, b int) bool {
+		if infos[a].Order != infos[b].Order {
+			return infos[a].Order < infos[b].Order
+		}
+
+		return infos[a].Visits > infos[b].Visits
+	})
+
+	var played *Candidate
+	var alternatives []Candidate
+
+	for i := range infos {
+		mi := &infos[i]
+		c := Candidate{
+			Move:      mi.Move,
+			Visits:    mi.Visits,
+			Winrate:   persp(mi.Winrate),
+			ScoreLead: sign * mi.ScoreLead,
+			PV:        limit(mi.PV, 6),
+		}
+
+		// EqualFold aus demselben Grund wie beim Erstwahl-Vergleich:
+		// rep.Coord ist bei Pass "Pass", KataGo schreibt "pass".
+		if played == nil && strings.EqualFold(mi.Move, coord) {
+			c := c
+			played = &c
+
+			continue
+		}
+
+		if len(alternatives) < maxAlternatives {
+			alternatives = append(alternatives, c)
+		}
+	}
+
+	return played, alternatives
 }
 
 func collectEffects(mv board.Move, size int, bb, ab *board.Board,

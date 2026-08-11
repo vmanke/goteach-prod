@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vmanke/goteach-prod/board"
 	"github.com/vmanke/goteach-prod/internal/auth"
+	"github.com/vmanke/goteach-prod/katago"
 	"github.com/vmanke/goteach-prod/shapes"
 	"github.com/vmanke/goteach-prod/teaching"
 )
@@ -913,12 +915,12 @@ func TestAnalyzeLinesFormat(t *testing.T) {
 		t.Errorf("Content-Type = %q, erwartet text/plain", ct)
 	}
 
-	records := strings.Split(rr.Body.String(), linesRecordSep)
+	records := linesRecords(rr.Body.String())
 
-	// Kopfsatz, Versionssatz, ein Satz je Zug (keine Vorgabesteine, der
-	// Mock findet auf der Demo-Partie keine Stränge).
-	if len(records) != 12 {
-		t.Fatalf("Datensätze = %d, erwartet 12", len(records))
+	// Kopfsatz, Versionssatz, ein Satz je Zug, Schlusspunkt (keine
+	// Vorgabesteine, der Mock findet auf der Demo-Partie keine Stränge).
+	if len(records) != 13 {
+		t.Fatalf("Datensätze = %d, erwartet 13: %q", len(records), records)
 	}
 
 	head := strings.Split(records[0], linesFieldSep)
@@ -933,7 +935,7 @@ func TestAnalyzeLinesFormat(t *testing.T) {
 		t.Errorf("Kopfsatz unerwartet: %q", records[0])
 	}
 
-	if records[1] != "V"+linesFieldSep+"2" {
+	if records[1] != "V"+linesFieldSep+"3" {
 		t.Errorf("Versionssatz unerwartet: %q", records[1])
 	}
 
@@ -949,6 +951,40 @@ func TestAnalyzeLinesFormat(t *testing.T) {
 	if text := first[9]; text == "" || strings.ContainsAny(text, "\n\x1e\x1f") {
 		t.Errorf("Lehrtext leer oder mit Steuerzeichen: %q", text)
 	}
+
+	// Der Schlusspunkt nennt die Zahl der ausgelieferten Züge — erst er
+	// unterscheidet eine fertige Analyse von einer abgerissenen Leitung.
+	if last := records[len(records)-1]; last != "Z"+linesFieldSep+"10" {
+		t.Errorf("Schlusssatz = %q, erwartet Z|10", last)
+	}
+}
+
+// linesRecords zerlegt einen Antwortkörper in seine nicht-leeren Sätze.
+// Leere Sätze sind Füllzeichen des Heartbeats und tragen keine Bedeutung —
+// der Client überspringt sie genauso.
+func linesRecords(body string) []string {
+	var out []string
+
+	for _, rec := range strings.Split(body, linesRecordSep) {
+		if rec != "" {
+			out = append(out, rec)
+		}
+	}
+
+	return out
+}
+
+// recordsOfType filtert die Sätze eines Typs heraus.
+func recordsOfType(records []string, kind string) []string {
+	var out []string
+
+	for _, rec := range records {
+		if strings.HasPrefix(rec, kind+linesFieldSep) {
+			out = append(out, rec)
+		}
+	}
+
+	return out
 }
 
 // Handicap-Partie: P-Sätze stehen zwischen V und dem ersten M, ein Satz
@@ -964,11 +1000,11 @@ func TestAnalyzeLinesFormatSetupStones(t *testing.T) {
 		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
 	}
 
-	records := strings.Split(rr.Body.String(), linesRecordSep)
+	records := linesRecords(rr.Body.String())
 
-	// H, V, 2×P, 2×M.
-	if len(records) != 6 {
-		t.Fatalf("Datensätze = %d, erwartet 6: %q", len(records), records)
+	// H, V, 2×P, 2×M, Z.
+	if len(records) != 7 {
+		t.Fatalf("Datensätze = %d, erwartet 7: %q", len(records), records)
 	}
 
 	wantP := [][2]string{{"Schwarz", "C7"}, {"Schwarz", "G3"}}
@@ -982,6 +1018,8 @@ func TestAnalyzeLinesFormatSetupStones(t *testing.T) {
 		}
 	}
 
+	// Die Vorgabesteine stehen VOR dem ersten Zug — sonst stünde das Brett
+	// beim Nachspielen zwischendurch falsch.
 	if fields := strings.Split(records[4], linesFieldSep); fields[0] != "M" {
 		t.Errorf("nach den P-Sätzen kein Zugsatz: %q", records[4])
 	}
@@ -1015,8 +1053,13 @@ func TestLinesBodyStrandRecord(t *testing.T) {
 		}},
 	}
 
-	records := strings.Split(linesBody(resp), linesRecordSep)
-	last := records[len(records)-1]
+	strands := recordsOfType(linesRecords(linesBody(resp)), "S")
+
+	if len(strands) != 1 {
+		t.Fatalf("%d S-Sätze, erwartet 1", len(strands))
+	}
+
+	last := strands[0]
 	fields := strings.Split(last, linesFieldSep)
 
 	if len(fields) != 16 || fields[0] != "S" {
@@ -1224,4 +1267,136 @@ func TestNaNAndInfAreSanitizedOutOfTheResponse(t *testing.T) {
 	if clean.Reports[0].WinrateAfter != 0.5 {
 		t.Fatal("ein endlicher Wert wurde verändert")
 	}
+}
+
+// flushRecorder hält fest, was bei jedem Flush bereits geschrieben war —
+// nur so lässt sich prüfen, dass Sätze einzeln hinausgehen und nicht am
+// Ende in einem Rutsch.
+type flushRecorder struct {
+	*httptest.ResponseRecorder
+	snapshots []string
+}
+
+func (f *flushRecorder) Flush() {
+	f.snapshots = append(f.snapshots, f.Body.String())
+}
+
+// slowMock rechnet wie der Mock, lässt sich dabei aber Zeit — so wie eine
+// echte Engine, bei der die letzte Stellung Minuten nach der ersten fertig
+// wird.
+type slowMock struct {
+	katago.Mock
+	delay time.Duration
+}
+
+func (s slowMock) AnalyzeGameStream(req katago.Request, turns []int,
+	emit func(*katago.Result) error) error {
+
+	return s.Mock.AnalyzeGameStream(req, turns, func(res *katago.Result) error {
+		time.Sleep(s.delay)
+
+		return emit(res)
+	})
+}
+
+// Der Kern der fortlaufenden Auslieferung: Wenn Zug 1 die Leitung
+// verlässt, dürfen die späteren Züge noch gar nicht gerechnet sein.
+func TestStreamLinesDeliversMovesOneByOne(t *testing.T) {
+	game, err := board.ParseSGF(demoSGF)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	streamLines(rec, game, teaching.Options{Visits: 1, Tau: 3.0},
+		func() (katago.Analyzer, bool, error) {
+			return slowMock{delay: 2 * time.Millisecond}, true, nil
+		})
+
+	body := rec.Body.String()
+	records := linesRecords(body)
+
+	if got := len(recordsOfType(records, "M")); got != 10 {
+		t.Fatalf("%d Zugsätze, erwartet 10", got)
+	}
+
+	// Der Kopf muss draußen sein, bevor der erste Zug gerechnet ist.
+	if len(rec.snapshots) == 0 {
+		t.Fatal("nichts wurde geflusht")
+	}
+
+	firstSnapshot := rec.snapshots[0]
+
+	if !strings.HasPrefix(firstSnapshot, "H"+linesFieldSep) {
+		t.Fatalf("erster Flush trägt keinen Kopfsatz: %q", firstSnapshot)
+	}
+
+	if strings.Contains(firstSnapshot, linesRecordSep+"M"+linesFieldSep) {
+		t.Fatal("der erste Flush trug schon einen Zug — der Kopf wartet")
+	}
+
+	// Und es muss einen Zeitpunkt geben, zu dem Zug 1 draußen war, Zug 10
+	// aber noch nicht: genau das ist "einzeln ausgeliefert".
+	partial := false
+
+	for _, snap := range rec.snapshots {
+		has1 := strings.Contains(snap, linesRecordSep+"M"+linesFieldSep+"1"+linesFieldSep)
+		has10 := strings.Contains(snap, linesRecordSep+"M"+linesFieldSep+"10"+linesFieldSep)
+
+		if has1 && !has10 {
+			partial = true
+
+			break
+		}
+	}
+
+	if !partial {
+		t.Fatal("kein Flush trug Zug 1 ohne Zug 10 — die Sätze kamen am Stück")
+	}
+
+	if last := records[len(records)-1]; last != "Z"+linesFieldSep+"10" {
+		t.Errorf("Schlusssatz = %q, erwartet Z|10", last)
+	}
+}
+
+// Bricht die Analyse ab, nachdem der Kopf draußen ist, kann der Fehler nur
+// noch im Körper reisen — als E-Satz, ohne Schlusspunkt.
+func TestStreamLinesReportsLateFailureAsRecord(t *testing.T) {
+	game, err := board.ParseSGF(demoSGF)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	streamLines(rec, game, teaching.Options{Visits: 1},
+		func() (katago.Analyzer, bool, error) {
+			return brokenAnalyzer{}, false, nil
+		})
+
+	records := linesRecords(rec.Body.String())
+
+	if len(records) == 0 || !strings.HasPrefix(records[0], "H"+linesFieldSep) {
+		t.Fatalf("kein Kopfsatz trotz gestarteter Antwort: %q", records)
+	}
+
+	if got := recordsOfType(records, "E"); len(got) != 1 {
+		t.Fatalf("kein Fehlersatz: %q", records)
+	}
+
+	if got := recordsOfType(records, "Z"); len(got) != 0 {
+		t.Fatal("abgebrochene Analyse trägt trotzdem einen Schlusspunkt")
+	}
+}
+
+// brokenAnalyzer scheitert mitten in der Partie.
+type brokenAnalyzer struct{ katago.Mock }
+
+func (brokenAnalyzer) AnalyzeGameStream(katago.Request, []int,
+	func(*katago.Result) error) error {
+
+	return errors.New("Engine weg")
 }

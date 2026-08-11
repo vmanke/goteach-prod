@@ -367,24 +367,28 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	// Client auch für seine eigenen Inseln verwendet.
 	wantLines := strings.EqualFold(get("format"), "lines")
 
-	// Header vor der Rechnung festschreiben: beginnt der Heartbeat die
-	// Antwort, lassen sie sich nicht mehr ändern. Das Füllzeichen ist je
-	// Format eines, das jeder Leser überliest — Whitespace vor einem
-	// JSON-Wert ist gültiges JSON, leere Datensätze überspringt der
-	// Lines-Parser.
-	filler := "\n"
-
+	// Dieses Format geht fortlaufend hinaus: Kopf und Vorgabesteine
+	// sofort, dann jede Lehreinheit, sobald sie gerechnet ist. Eine lange
+	// Partie füllt die Seite so von oben her, statt sie minutenlang leer
+	// zu lassen.
 	if wantLines {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		streamLines(w, game, opt, startAnalyzer)
 
-		filler = linesRecordSep
-	} else {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		return
+	}
 
-		if wantsDownload(get) {
-			w.Header().Set("Content-Disposition",
-				`attachment; filename="goteach-report.json"`)
-		}
+	// Header vor der Rechnung festschreiben: beginnt der Heartbeat die
+	// Antwort, lassen sie sich nicht mehr ändern. Das Füllzeichen ist
+	// eines, das jeder Leser überliest — Whitespace vor einem JSON-Wert
+	// ist gültiges JSON.
+	filler := "\n"
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if wantsDownload(get) {
+		w.Header().Set("Content-Disposition",
+			`attachment; filename="goteach-report.json"`)
 	}
 
 	resp, status, started, err := computeKeepingAlive(w, keepAliveInterval, filler,
@@ -402,30 +406,13 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Status 200 und Füllbytes sind draußen; der Fehler kann nur noch
-		// im Body reisen. JSON-Leser prüfen "error", der Lines-Parser
-		// findet keinen Kopfsatz und meldet die Partie als unauswertbar.
-		if wantLines {
-			_, _ = io.WriteString(w, "E"+linesFieldSep+cleanRecordField(err.Error()))
-
-			return
-		}
-
+		// im Body reisen — JSON-Leser prüfen "error".
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 
 		if err := enc.Encode(map[string]string{"error": err.Error()}); err != nil {
 			log.Printf("goteach-server: JSON-Antwort: %v", err)
 		}
-
-		return
-	}
-
-	if wantLines {
-		if !started {
-			w.WriteHeader(http.StatusOK)
-		}
-
-		_, _ = io.WriteString(w, linesBody(resp))
 
 		return
 	}
@@ -449,6 +436,164 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = w.Write(append(body, '\n'))
+}
+
+// streamLines schreibt die Analyse fortlaufend im Kompaktformat.
+//
+// Reihenfolge: Kopf, Formatversion und Vorgabesteine gehen sofort hinaus —
+// sie stehen fest, bevor die Engine rechnet. Danach je Zug ein Satz,
+// sobald er fertig ist, am Ende die Erzählstränge und der Schlusspunkt.
+//
+// Fehler haben zwei Gesichter: Bevor etwas geschrieben ist, bleibt es ein
+// echter HTTP-Status. Danach ist der Status längst 200 und der Fehler kann
+// nur noch als E-Satz im Körper reisen — der Client sieht dann eine
+// unvollständige Partie samt Grund.
+func streamLines(w http.ResponseWriter, game *board.Game, opt teaching.Options,
+	start func() (katago.Analyzer, bool, error)) {
+
+	an, synthetic, err := start()
+
+	if err != nil {
+		httpError(w, http.StatusBadGateway, "KataGo-Start: %v", err)
+
+		return
+	}
+
+	defer func() {
+		if err := an.Close(); err != nil {
+			log.Printf("goteach-server: Analyzer schließen: %v", err)
+		}
+	}()
+
+	// Effektive Werte melden: Query-Parameter überschreiben die SGF-Werte.
+	effKomi := game.Komi
+
+	if opt.Komi != nil {
+		effKomi = *opt.Komi
+	}
+
+	effRules := game.Rules
+
+	if opt.Rules != "" {
+		effRules = opt.Rules
+	}
+
+	// synthetic steht hier schon fest, weil dieser Pfad die Remote-Engine
+	// nie sieht: Ist KATAGO_REMOTE_URL gesetzt, ist handleAnalyze längst
+	// in den Auftrags-Weg abgebogen.
+	head := headRecords(analyzeResponse{
+		Size:      game.Size,
+		Komi:      effKomi,
+		Rules:     effRules,
+		Moves:     len(game.Moves),
+		Synthetic: synthetic,
+		Setup:     setupStones(game),
+	})
+
+	flusher, _ := w.(http.Flusher)
+	write := func(records ...string) {
+		for _, rec := range records {
+			_, _ = io.WriteString(w, rec)
+			_, _ = io.WriteString(w, linesRecordSep)
+		}
+
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	write(head...)
+
+	// Die Rechnung läuft in einer eigenen Goroutine und schiebt fertige
+	// Sätze herüber; geschrieben wird ausschließlich hier, sonst kämen
+	// Heartbeat und Nutzlast einander ins Gehege. Der gepufferte Kanal
+	// bremst die Analyse, wenn das Netz langsamer ist als die Engine.
+	records := make(chan string, 32)
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(records)
+
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("goteach-server: Panic in der Analyse: %v", rec)
+				done <- fmt.Errorf("interner Fehler in der Analyse")
+			}
+		}()
+
+		_, err := teaching.AnalyzeStream(game, an, opt, teaching.StreamHandler{
+			Move: func(m *teaching.MoveReport) error {
+				records <- moveRecord(m)
+
+				return nil
+			},
+			Strands: func(strands []teaching.Strand) error {
+				for i := range strands {
+					records <- strandRecord(&strands[i])
+				}
+
+				return nil
+			},
+		})
+
+		done <- err
+	}()
+
+	// Solange nichts fertig wird, hält ein leerer Datensatz die Verbindung
+	// offen — Proxys kappen sonst nach etwa einer Minute ohne Datenfluss.
+	ticker := time.NewTicker(keepAliveInterval)
+	defer ticker.Stop()
+
+	moves := 0
+
+	for {
+		select {
+		case rec, ok := <-records:
+			if !ok {
+				if err := <-done; err != nil {
+					log.Printf("goteach-server: Analyse: %v", err)
+					write(linesRecord("E", err.Error()))
+
+					return
+				}
+
+				write(endRecord(moves))
+
+				return
+			}
+
+			if strings.HasPrefix(rec, "M"+linesFieldSep) {
+				moves++
+			}
+
+			write(rec)
+			ticker.Reset(keepAliveInterval)
+
+		case <-ticker.C:
+			write()
+		}
+	}
+}
+
+// setupStones übersetzt die Vorgabesteine der Partie für die Antwort.
+func setupStones(game *board.Game) []setupStone {
+	var out []setupStone
+
+	for _, s := range game.Setup {
+		player := "Schwarz"
+
+		if s.Color == board.White {
+			player = "Weiß"
+		}
+
+		out = append(out, setupStone{
+			Player: player,
+			Coord:  board.ToGTP(s.Point, game.Size),
+		})
+	}
+
+	return out
 }
 
 // sanitizedResponse ersetzt NaN und ±Inf in allen Gleitkommafeldern der
@@ -551,28 +696,13 @@ func computeAnalysis(game *board.Game, opt teaching.Options,
 		effRules = opt.Rules
 	}
 
-	var setup []setupStone
-
-	for _, s := range game.Setup {
-		player := "Schwarz"
-
-		if s.Color == board.White {
-			player = "Weiß"
-		}
-
-		setup = append(setup, setupStone{
-			Player: player,
-			Coord:  board.ToGTP(s.Point, game.Size),
-		})
-	}
-
 	return analyzeResponse{
 		Size:      game.Size,
 		Komi:      effKomi,
 		Rules:     effRules,
 		Moves:     len(game.Moves),
 		Synthetic: synthetic,
-		Setup:     setup,
+		Setup:     setupStones(game),
 		Strands:   report.Strands,
 		Reports:   report.Moves,
 	}, http.StatusOK, nil
@@ -665,80 +795,116 @@ func cleanRecordField(s string) string {
 	}, s)
 }
 
-// linesVersion ist die Formatversion des V-Satzes. Version 2 ergänzt
-// V/P/S; Clients, die kein V ≥ 2 sehen, dürfen kein Brett nachspielen —
-// ein Alt-Server ohne P-Sätze ließe eine Handicap-Partie falsch aussehen.
-const linesVersion = 2
+// linesVersion ist die Formatversion des V-Satzes.
+//
+//	2 — V/P/S ergänzt. Ohne V ≥ 2 darf ein Client kein Brett nachspielen:
+//	    Ein Alt-Server ohne P-Sätze ließe eine Handicap-Partie falsch
+//	    aussehen.
+//	3 — Die Sätze gehen einzeln hinaus, und ein Z-Satz schließt sie ab.
+//	    Ohne V ≥ 3 darf ein Client aus dem fehlenden Schlusspunkt NICHT
+//	    auf eine abgerissene Leitung schließen — ältere Stände kannten
+//	    ihn nicht.
+const linesVersion = 3
 
-// linesBody baut die Analyse als Kompaktformat in der Satzfolge
-// H, V, P*, M*, S*:
+// linesRecord fügt die Felder eines Datensatzes zusammen, jedes von
+// Steuerzeichen befreit.
+func linesRecord(fields ...string) string {
+	for i, f := range fields {
+		fields[i] = cleanRecordField(f)
+	}
+
+	return strings.Join(fields, linesFieldSep)
+}
+
+// Das Kompaktformat in der Satzfolge H, V, P*, M*, S*, Z:
 //
 //	H|size|komi|rules|moves|synthetic
 //	V|version
 //	P|player|coord                       je Vorgabestein (AB/AW, Handicap)
 //	M|number|player|coord|category|pointsLost|winrateBefore|winrateAfter|bestMove|text
 //	S|id|area|from|to|count|movesCSV|lostBlack|lostWhite|captures|worstNumber|worstCoord|worstCategory|worstLost|shapes|text
+//	Z|moves                              Schlusspunkt: so viele M-Sätze waren es
 //
 // H- und M-Sätze bleiben bei exakt 6 bzw. 10 Feldern — Bestandsclients
 // destrukturieren beide hart. Unbekannte Satztypen überspringt der Client
 // still; neue Informationen kommen deshalb als neue Sätze, nie als neue
 // Felder bestehender Sätze. Zahlen mit fester Präzision, Text von
 // Steuerzeichen befreit — der Client darf splitten statt parsen.
+//
+// Die Sätze gehen einzeln hinaus, sobald sie fertig sind (streamLines);
+// linesBody baut denselben Körper am Stück, für Tests und für Aufrufer,
+// die das Ergebnis ohnehin schon vollständig in der Hand halten.
 func linesBody(resp analyzeResponse) string {
-	record := func(fields ...string) string {
-		for i, f := range fields {
-			fields[i] = cleanRecordField(f)
-		}
-
-		return strings.Join(fields, linesFieldSep)
-	}
-
-	records := []string{record(
-		"H",
-		strconv.Itoa(resp.Size),
-		strconv.FormatFloat(resp.Komi, 'f', 1, 64),
-		resp.Rules,
-		strconv.Itoa(resp.Moves),
-		strconv.FormatBool(resp.Synthetic),
-	)}
-
-	records = append(records, record("V", strconv.Itoa(linesVersion)))
-
-	for _, s := range resp.Setup {
-		records = append(records, record("P", s.Player, s.Coord))
-	}
+	records := headRecords(resp)
 
 	for i := range resp.Reports {
-		m := &resp.Reports[i]
-		coord := m.Coord
-
-		if m.Pass {
-			coord = "pass"
-		}
-
-		records = append(records, record(
-			"M",
-			strconv.Itoa(m.Number),
-			m.Player,
-			coord,
-			m.Category,
-			strconv.FormatFloat(m.PointsLost, 'f', 1, 64),
-			strconv.FormatFloat(m.WinrateBefore, 'f', 3, 64),
-			strconv.FormatFloat(m.WinrateAfter, 'f', 3, 64),
-			m.BestMove,
-			m.Text,
-		))
+		records = append(records, moveRecord(&resp.Reports[i]))
 	}
 
 	for i := range resp.Strands {
-		records = append(records, strandRecord(record, &resp.Strands[i]))
+		records = append(records, strandRecord(&resp.Strands[i]))
 	}
+
+	records = append(records, endRecord(len(resp.Reports)))
 
 	return strings.Join(records, linesRecordSep)
 }
 
+// headRecords sind die Sätze vor dem ersten Zug: Kopf, Formatversion und
+// die Vorgabesteine. Sie stehen fest, bevor die Engine rechnet, und gehen
+// im Strom sofort hinaus.
+func headRecords(resp analyzeResponse) []string {
+	records := []string{
+		linesRecord(
+			"H",
+			strconv.Itoa(resp.Size),
+			strconv.FormatFloat(resp.Komi, 'f', 1, 64),
+			resp.Rules,
+			strconv.Itoa(resp.Moves),
+			strconv.FormatBool(resp.Synthetic),
+		),
+		linesRecord("V", strconv.Itoa(linesVersion)),
+	}
+
+	for _, s := range resp.Setup {
+		records = append(records, linesRecord("P", s.Player, s.Coord))
+	}
+
+	return records
+}
+
+// moveRecord baut den M-Satz einer Lehreinheit (10 Felder).
+func moveRecord(m *teaching.MoveReport) string {
+	coord := m.Coord
+
+	if m.Pass {
+		coord = "pass"
+	}
+
+	return linesRecord(
+		"M",
+		strconv.Itoa(m.Number),
+		m.Player,
+		coord,
+		m.Category,
+		strconv.FormatFloat(m.PointsLost, 'f', 1, 64),
+		strconv.FormatFloat(m.WinrateBefore, 'f', 3, 64),
+		strconv.FormatFloat(m.WinrateAfter, 'f', 3, 64),
+		m.BestMove,
+		m.Text,
+	)
+}
+
+// endRecord schließt den Strom ab und nennt die Zahl der ausgelieferten
+// Züge. Erst dieser Satz unterscheidet eine fertige Analyse von einer
+// abgerissenen Verbindung — solange die Sätze am Stück kamen, tat das der
+// vollständige Körper.
+func endRecord(moves int) string {
+	return linesRecord("Z", strconv.Itoa(moves))
+}
+
 // strandRecord baut den S-Satz eines Erzählstrangs (16 Felder).
-func strandRecord(record func(...string) string, s *teaching.Strand) string {
+func strandRecord(s *teaching.Strand) string {
 	moves := make([]string, len(s.Moves))
 
 	for i, n := range s.Moves {
@@ -765,7 +931,7 @@ func strandRecord(record func(...string) string, s *teaching.Strand) string {
 		worstLost = s.Worst.PointsLost
 	}
 
-	return record(
+	return linesRecord(
 		"S",
 		strconv.Itoa(s.ID),
 		s.Area,
