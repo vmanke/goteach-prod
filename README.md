@@ -63,15 +63,22 @@ Echte Analyse:
 Offline-Demo ohne KataGo (SYNTHETISCHE Werte, deutlich gebannert):
 
 ```bash
-./goteach -sgf demo/demo.sgf -mock
+./goteach -sgf demo/demo.sgf -mock -moves
 ```
 
-Wichtige Flags: `-from/-to` (Zugbereich), `-tau` (Abklinglänge des
-Stärkemaßes, Default 3.0), `-rules`, `-komi`, `-json`.
+Standardansicht sind die **Erzählstränge**; `-moves` schaltet zusätzlich die
+Lehreinheit je Zug frei. Der Mock findet auf der Demo-Partie keine Stränge —
+ohne `-moves` bleibt die Ausgabe deshalb bis auf die Zusammenfassung leer.
+
+Wichtige Flags: `-moves` (Lehreinheit je Zug), `-from/-to` (Zugbereich),
+`-tau` (Abklinglänge des Stärkemaßes, Default 3.0), `-rules`, `-komi`,
+`-json`.
 
 Beispielausgabe (aus der **Mock**-Demo; Zahlen daher synthetisch):
 
 ```
+Keine Erzählstränge gefunden — die Partie verlief ohne erkennbar zusammenhängende Kämpfe.
+
 Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Schwarz: 50.0 % → 77.5 %.
 Engine-Erstwahl: A19.
 Schwarze Kette um Q16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.00 → 0.38.
@@ -80,7 +87,7 @@ Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zug
 Zusammenfassung
 ---------------
 Schwarz: ausgezeichnet ×5 | Ø Punktverlust -9.82
-Weiß:    ausgezeichnet ×5 | Ø Punktverlust -10.26
+Weiß: ausgezeichnet ×5 | Ø Punktverlust -10.26
 ```
 
 ## HTTP-Dienst (`internal/server`)
