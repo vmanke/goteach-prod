@@ -45,7 +45,7 @@ func befundSentence(f *roseFinding, prevCoord string) string {
 		return fmt.Sprintf(
 			"R wie Respond: Der letzte Zug (%s) bedroht die %s Kette um %s "+
 				"(%d Freiheiten, Stärke %.2f) — erst die Not klären.",
-			prevCoord, adjColor(f.color), f.rep, f.libs, f.strength)
+			prevCoord, adjColor(f.color), f.rep, f.libs, noNegZero(f.strength))
 
 	case roseO:
 		if f.tactic != nil {
@@ -58,13 +58,13 @@ func befundSentence(f *roseFinding, prevCoord string) string {
 		return fmt.Sprintf(
 			"O wie Offense: Die %s Kette um %s ist schwach (%d Freiheiten, "+
 				"Stärke %.2f) — Angriff oder Trennung ist der dringlichste Zug.",
-			adjColor(f.color), f.rep, f.libs, f.strength)
+			adjColor(f.color), f.rep, f.libs, noNegZero(f.strength))
 
 	default: // roseS
 		return fmt.Sprintf(
 			"S wie Status: Die eigene Kette um %s steht schwach (%d "+
 				"Freiheiten, Stärke %.2f) — erst verstärken, dann expandieren.",
-			f.rep, f.libs, f.strength)
+			f.rep, f.libs, noNegZero(f.strength))
 	}
 }
 

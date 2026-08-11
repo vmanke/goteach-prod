@@ -283,7 +283,7 @@ func chainProse(r *MoveReport) []string {
 			out = append(out, fmt.Sprintf(
 				"%s Kette um %s: Stärke %.2f → %.2f.",
 				upperFirst(adjColor(e.Color)), e.Rep,
-				e.StrengthBefore, e.StrengthAfter))
+				noNegZero(e.StrengthBefore), noNegZero(e.StrengthAfter)))
 
 		case e.Liberties <= 2 && !e.UncondAlive && e.Stones >= 2:
 			out = append(out, fmt.Sprintf(
@@ -293,6 +293,17 @@ func chainProse(r *MoveReport) []string {
 	}
 
 	return out
+}
+
+// noNegZero druckt Werte, die auf zwei Stellen null ergeben, ohne
+// Vorzeichen: "Stärke -0.00" ist keine Aussage über die Stellung, sondern
+// eine Eigenheit der Fließkommadarstellung.
+func noNegZero(v float64) float64 {
+	if math.Abs(v) < 0.005 {
+		return 0
+	}
+
+	return v
 }
 
 func upperFirst(s string) string {

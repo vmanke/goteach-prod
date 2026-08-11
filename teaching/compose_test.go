@@ -322,3 +322,22 @@ func TestComposeDemoGameRepetition(t *testing.T) {
 		}
 	}
 }
+
+// "Stärke -0.00" ist keine Aussage über die Stellung, sondern eine
+// Eigenheit der Fließkommadarstellung — sie darf nicht im Text landen.
+func TestChainProseHasNoNegativeZero(t *testing.T) {
+	r := &MoveReport{Effects: []GroupEffect{
+		{Color: "Weiß", Rep: "D4", Stones: 1, Liberties: 4,
+			StrengthBefore: -0.0004, StrengthAfter: 0.38},
+	}}
+
+	got := chainProse(r)
+
+	if len(got) != 1 {
+		t.Fatalf("%d Sätze, erwartet 1: %v", len(got), got)
+	}
+
+	if strings.Contains(got[0], "-0.00") {
+		t.Fatalf("negative Null im Text: %q", got[0])
+	}
+}
