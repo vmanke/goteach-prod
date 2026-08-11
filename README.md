@@ -156,6 +156,15 @@ stdlib-implementiert (PBKDF2-HMAC-SHA256 + JWT HS256).
 | `AUTH_USERS`      | `alice:pbkdf2-sha256$…,bob:pbkdf2-sha256$…` (kommagetrennt) |
 | `AUTH_JWT_SECRET` | HMAC-Secret der Tokens; **Pflicht** sobald `AUTH_USERS` gesetzt ist (sonst startet der Server nicht) |
 | `AUTH_TOKEN_TTL`  | Token-Lebensdauer, `time.ParseDuration`-Syntax (Default `24h`) |
+| `GOTEACH_REQUIRE_AUTH` | Verbietet offenen Betrieb: fehlt `AUTH_USERS`, startet der Server nicht. `0`/`false` schaltet ab |
+
+**Empfehlung für öffentlich erreichbare Instanzen:** `GOTEACH_REQUIRE_AUTH=1`
+setzen. Ohne `AUTH_USERS` ist `POST /analyze` sonst für jeden offen — und
+jede Anfrage bindet die Maschine minutenlang mit KataGo. Ein vergessenes
+oder vertipptes Secret fällt sonst nur als Log-Zeile auf. Bewusst ein
+ausdrücklicher Schalter statt einer automatischen Umgebungserkennung: Der
+Dienst soll nicht raten, ob er „in Produktion" läuft, und ein Fehlschluss
+soll nicht das nächste Deployment beim Start umbringen.
 
 Hash erzeugen und einloggen:
 
