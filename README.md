@@ -107,10 +107,51 @@ PORT=8080 ./goteach-server
 | `GET /api`      | Dienstinfo (JSON)                                           |
 | `GET /healthz`  | Liveness-Check                                              |
 | `POST /login`   | Zugangsdaten → JWT (nur bei aktiver Auth, sonst 404)        |
-| `POST /analyze` | SGF → Teaching-Reports als JSON (bei aktiver Auth: `Authorization: Bearer <Token>`) |
+| `POST /analyze` | SGF → Teaching-Reports als JSON (bei aktiver Auth: `Authorization: Bearer <Token>`). Mit Engine-Host: **202** mit Auftrags-ID statt Ergebnis |
+| `GET /analyze/status` | Zustand und Ergebnis eines Auftrags (`?id=…`); nur bei gesetztem `KATAGO_REMOTE_URL`, sonst 404 |
 | `POST /engine/analyze` | Engine-Passthrough für Remote-Instanzen (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
+| `POST /engine/jobs`, `GET /engine/jobs` | Auftragsbetrieb auf dem Engine-Host (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
 | `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
 | `GET /app.js`, `GET /style.css`, `GET /favicon.svg` | eingebettete Assets     |
+
+### Synchron oder als Auftrag
+
+Rechnet die Instanz **selbst** (lokale Engine oder Mock), antwortet
+`POST /analyze` wie bisher direkt mit dem Report.
+
+Liegt die Engine auf einem **anderen Host** (`KATAGO_REMOTE_URL`), wird nicht
+mehr synchron gerechnet. Der Grund ist hart: Eine vollständige Partie kostet
+Minuten, und die aufrufende Instanz läuft typischerweise unter einem
+Serverless-Limit — auf Vercel 300 Sekunden. Das war nicht zu gewinnen, die
+Funktion wurde mitten in der Analyse abgeschnitten.
+
+Stattdessen:
+
+```bash
+# 1. Auftrag stellen — antwortet in Millisekunden
+curl -X POST "$BASE/analyze?ogs=https://online-go.com/game/12345678" \
+     -H "Authorization: Bearer $TOKEN"
+# {"jobId":"…","status":"pending","statusUrl":"/analyze/status?id=…"}
+
+# 2. Ergebnis abholen, bis "status" auf "done" steht
+curl "$BASE/analyze/status?id=…" -H "Authorization: Bearer $TOKEN"
+```
+
+SGF und Parameter werden weiterhin **sofort** geprüft; Eingabefehler kommen
+also direkt zurück und nicht erst nach dem Polling. Das Frontend erledigt das
+Abholen von selbst (Abstand wächst von 2 auf 10 Sekunden); ohne JavaScript
+leitet der Formular-Post auf eine Statusseite um, die sich alle 5 Sekunden
+selbst nachlädt.
+
+Grenzen des Auftragsregisters (bewusst im Speicher, keine Datenbank):
+
+* Ergebnisse werden 30 Minuten vorgehalten, danach verworfen.
+* Höchstens eine Analyse rechnet gleichzeitig — KataGo sättigt ohnehin alle
+  Kerne. Weitere Aufträge bleiben `pending`; über 32 offene Aufträge kommt
+  `429`.
+* Hält die Fly-Maschine an (`min_machines_running = 0`), sind laufende
+  Aufträge verloren und müssen neu gestellt werden. Das Polling hält die
+  Maschine wach; wer den Tab schließt, riskiert den Auftrag.
 
 `POST /analyze` akzeptiert die Partie auf vier Wegen:
 
@@ -321,6 +362,11 @@ Im Vercel-Dashboard sollten Install-/Build-Command-Overrides trotzdem
 (Functions haben keine Engine-Binary). Für echte Analysen stattdessen
 `KATAGO_REMOTE_URL` und `KATAGO_REMOTE_TOKEN` auf den Engine-Host
 zeigen lassen (siehe „Remote-Engine“); ohne beides antwortet der Mock.
+Mit gesetztem `KATAGO_REMOTE_URL` läuft `/analyze` im Auftragsbetrieb und
+antwortet sofort — das Serverless-Limit wird damit nicht mehr berührt.
+`KATAGO_REMOTE_TIMEOUT` (Default `2m`) deckelt die Aufrufe zum Engine-Host
+und muss **unter** dem Limit der Umgebung bleiben, damit ein Fehler als
+lesbarer 502 ankommt statt als roher Plattform-Timeout.
 Für den JWT-Schutz `AUTH_USERS` und `AUTH_JWT_SECRET` als
 Environment-Variablen eintragen. Der Server lauscht auf dem `PORT` aus
 der Umgebung; das Root Directory des Projekts muss auf die Repo-Wurzel

@@ -264,6 +264,69 @@
     results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
+  // pollAnalyze holt das Ergebnis eines Auftrags ab. Der Abstand wächst
+  // von 2 auf 10 Sekunden: schnell genug, dass kurze Partien flott
+  // erscheinen, sparsam genug, dass eine lange Analyse den Server nicht
+  // mit Abfragen überzieht.
+  function pollAnalyze(statusUrl) {
+    var delay = 2000;
+    var maxDelay = 10000;
+    var started = Date.now();
+
+    function elapsed() {
+      return Math.round((Date.now() - started) / 1000);
+    }
+
+    function tick() {
+      return fetch(statusUrl, { headers: authHeaders({}) })
+        .then(function (res) {
+          return res.json().then(function (payload) {
+            if (res.status === 401 && state.authRequired) {
+              setToken('');
+              showLogin(true);
+              throw new Error(payload.error || 'Login nötig');
+            }
+
+            if (!res.ok) {
+              throw new Error(payload.error || ('HTTP ' + res.status));
+            }
+
+            if (payload.status === 'error') {
+              throw new Error(payload.error || 'Analyse fehlgeschlagen');
+            }
+
+            if (payload.status === 'done') {
+              if (!payload.result) {
+                throw new Error('Auftrag fertig, aber ohne Ergebnis');
+              }
+
+              lastReport = payload.result;
+              render(payload.result);
+              setStatus('Analyse abgeschlossen (' + elapsed() + ' s).', false);
+
+              return null;
+            }
+
+            setStatus('Analyse läuft auf dem Engine-Host … ' +
+              elapsed() + ' s. Eine vollständige Partie dauert Minuten.',
+              false);
+
+            return new Promise(function (resolve) {
+              setTimeout(resolve, delay);
+            }).then(function () {
+              delay = Math.min(Math.round(delay * 1.5), maxDelay);
+
+              return tick();
+            });
+          });
+        });
+    }
+
+    setStatus('Auftrag angenommen, Analyse startet …', false);
+
+    return tick();
+  }
+
   // Ein Erzählstrang: die Hauptsicht auf eine Partie. Zug-Reports bleiben
   // darunter als Detailebene stehen.
   function renderStrand(strand) {
@@ -347,6 +410,14 @@
           // im Body statt im Status.
           if (payload && payload.error) {
             throw new Error(payload.error);
+          }
+
+          // Läuft die Engine auf einem anderen Host, wird nicht mehr
+          // synchron gerechnet: Die Antwort trägt nur eine Auftrags-ID,
+          // das Ergebnis wird abgeholt. Das ist der Weg um das
+          // 300-Sekunden-Limit der Serverless-Umgebung herum.
+          if (res.status === 202 && payload && payload.statusUrl) {
+            return pollAnalyze(payload.statusUrl);
           }
 
           lastReport = payload;

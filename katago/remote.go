@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -15,9 +16,34 @@ import (
 // unlesbare Antwort). Der Server mappt sie auf 502 statt 500.
 var ErrRemote = errors.New("katago: Remote-Engine")
 
-// remoteTimeout deckelt einen kompletten Analyse-Roundtrip; Analysen
-// skalieren mit Visits × Stellungen und dürfen Minuten dauern.
-const remoteTimeout = 5 * time.Minute
+// defaultRemoteTimeout deckelt einen Analyse-Roundtrip.
+//
+// Der Wert MUSS unter dem Limit der Laufzeitumgebung bleiben. Er stand
+// einmal auf 5 Minuten — exakt dem Serverless-Limit von Vercel. Damit
+// konnte der Client nie zuerst auslösen: Die Plattform beendete die
+// Funktion immer eine Haaresbreite früher, der Aufrufer sah einen rohen
+// Plattform-Timeout statt der vorgesehenen 502-Meldung „Remote-Engine: …".
+//
+// Überschreibbar per KATAGO_REMOTE_TIMEOUT (time.ParseDuration).
+const defaultRemoteTimeout = 2 * time.Minute
+
+// remoteTimeout liest die Obergrenze aus der Umgebung; unlesbare oder
+// nicht positive Werte fallen auf den Default zurück.
+func remoteTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("KATAGO_REMOTE_TIMEOUT"))
+
+	if v == "" {
+		return defaultRemoteTimeout
+	}
+
+	d, err := time.ParseDuration(v)
+
+	if err != nil || d <= 0 {
+		return defaultRemoteTimeout
+	}
+
+	return d
+}
 
 // maxRemoteReplyBytes deckelt die Antwort des Engine-Hosts. Ownership-
 // Felder sind groß (Brettpunkte × Turns), aber selbst eine volle Partie
@@ -42,7 +68,7 @@ func NewRemote(baseURL, token string) *Remote {
 	return &Remote{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
-		client:  &http.Client{Timeout: remoteTimeout},
+		client:  &http.Client{Timeout: remoteTimeout()},
 	}
 }
 

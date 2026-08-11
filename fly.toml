@@ -24,6 +24,15 @@
 # * auto_stop/auto_start: die Maschine schläft ohne Verkehr und kostet
 #   dann nichts; die erste Anfrage weckt sie (ein paar Sekunden Kaltstart,
 #   zusätzlich zur Analysezeit).
+# * Aufträge liegen im Speicher dieser Maschine (siehe internal/server,
+#   Auftragsbetrieb). Hält sie an, sind laufende Aufträge verloren und
+#   müssen neu gestellt werden. Das Polling des Clients hält sie wach —
+#   wer den Tab schließt, riskiert seinen Auftrag. Wem das zu wackelig
+#   ist, setzt min_machines_running = 1 (kostet dann durchgehend).
+# * Läuft je mehr als eine Maschine, muss die Statusabfrage zu der
+#   Maschine zurück, die rechnet. Dafür trägt die Auftrags-ID die
+#   FLY_MACHINE_ID, und die Abfrage antwortet nötigenfalls mit dem
+#   fly-replay-Header.
 # * CORS: die Vereinsseite ist per Default freigegeben (internal/server);
 #   weitere Absender über GOTEACH_CORS_ORIGINS im [env]-Block.
 

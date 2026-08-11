@@ -104,7 +104,9 @@ func Handler() http.Handler {
 	mux.HandleFunc("/healthz", handleHealth)
 	mux.HandleFunc("/login", handleLogin)
 	mux.HandleFunc("/analyze", requireAuth(handleAnalyze))
+	mux.HandleFunc("/analyze/status", requireAuth(handleAnalyzeStatus))
 	mux.HandleFunc("/engine/analyze", handleEngineAnalyze)
+	mux.HandleFunc("/engine/jobs", handleEngineJobs)
 	mux.HandleFunc("/robots.txt", handleRobots)
 	mux.HandleFunc("/sitemap.xml", handleSitemap)
 	mux.HandleFunc("/app.js", handleAsset("app.js", "text/javascript; charset=utf-8"))
@@ -335,6 +337,20 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Liegt die Engine auf einem anderen Host, wird hier nicht gerechnet:
+	// Eine volle Partie kostet Minuten, und diese Instanz läuft unter einem
+	// Serverless-Limit (auf Vercel 300 s), das sie unweigerlich reißt. Der
+	// Auftrag wandert deshalb zum Engine-Host, der ihn ohne solches Limit
+	// abarbeitet; der Client holt das Ergebnis über /analyze/status ab.
+	//
+	// SGF und Optionen sind oben bereits geprüft — Eingabefehler meldet
+	// diese Instanz also weiterhin sofort, nicht erst nach dem Polling.
+	if katagoRemoteConfigured() {
+		submitAnalyzeJob(w, r, string(data), get)
+
+		return
+	}
+
 	// Kompaktformat für Clients ohne JSON-Parser (die Vereinshomepage
 	// rendert im wasm-Client): ein Datensatz je Zug, Felder mit US (0x1f),
 	// Datensätze mit RS (0x1e) getrennt — dieselbe Codec-Idee, die der
@@ -363,62 +379,7 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	resp, status, started, err := computeKeepingAlive(w, keepAliveInterval, filler,
 		func() (analyzeResponse, int, error) {
-			an, synthetic, err := startAnalyzer()
-
-			if err != nil {
-				return analyzeResponse{}, http.StatusBadGateway,
-					fmt.Errorf("KataGo-Start: %w", err)
-			}
-
-			defer func() {
-				if err := an.Close(); err != nil {
-					log.Printf("goteach-server: Analyzer schließen: %v", err)
-				}
-			}()
-
-			report, err := teaching.AnalyzeGame(game, an, opt)
-
-			if err != nil {
-				// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
-				// kein internes Problem dieser Instanz.
-				if errors.Is(err, katago.ErrRemote) {
-					return analyzeResponse{}, http.StatusBadGateway,
-						fmt.Errorf("Remote-Engine: %w", err)
-				}
-
-				return analyzeResponse{}, http.StatusInternalServerError,
-					fmt.Errorf("Analyse: %w", err)
-			}
-
-			// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
-			// ob dort eine echte Engine oder der Mock gerechnet hat.
-			if rm, ok := an.(*katago.Remote); ok {
-				synthetic = rm.Synthetic()
-			}
-
-			// Effektive Werte melden: Query-Parameter (opt) überschreiben
-			// die SGF-Werte – genau wie in teaching.Analyze verwendet.
-			effKomi := game.Komi
-
-			if opt.Komi != nil {
-				effKomi = *opt.Komi
-			}
-
-			effRules := game.Rules
-
-			if opt.Rules != "" {
-				effRules = opt.Rules
-			}
-
-			return analyzeResponse{
-				Size:      game.Size,
-				Komi:      effKomi,
-				Rules:     effRules,
-				Moves:     len(game.Moves),
-				Synthetic: synthetic,
-				Strands:   report.Strands,
-				Reports:   report.Moves,
-			}, http.StatusOK, nil
+			return computeAnalysis(game, opt, startAnalyzer)
 		})
 
 	if err != nil {
@@ -469,6 +430,74 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	if err := enc.Encode(resp); err != nil {
 		log.Printf("goteach-server: JSON-Antwort: %v", err)
 	}
+}
+
+// computeAnalysis rechnet eine Partie durch und baut daraus die Antwort.
+//
+// start wählt den Analyzer und ist deshalb Parameter statt fester Aufruf:
+// Der synchrone Pfad nimmt startAnalyzer (lokal oder Remote, je nach
+// Umgebung), der Auftrags-Worker auf dem Engine-Host dagegen zwingend
+// startLocalAnalyzer — sonst könnten sich zwei Instanzen die Arbeit im
+// Kreis weiterreichen.
+func computeAnalysis(game *board.Game, opt teaching.Options,
+	start func() (katago.Analyzer, bool, error)) (analyzeResponse, int, error) {
+
+	an, synthetic, err := start()
+
+	if err != nil {
+		return analyzeResponse{}, http.StatusBadGateway,
+			fmt.Errorf("KataGo-Start: %w", err)
+	}
+
+	defer func() {
+		if err := an.Close(); err != nil {
+			log.Printf("goteach-server: Analyzer schließen: %v", err)
+		}
+	}()
+
+	report, err := teaching.AnalyzeGame(game, an, opt)
+
+	if err != nil {
+		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
+		// kein internes Problem dieser Instanz.
+		if errors.Is(err, katago.ErrRemote) {
+			return analyzeResponse{}, http.StatusBadGateway,
+				fmt.Errorf("Remote-Engine: %w", err)
+		}
+
+		return analyzeResponse{}, http.StatusInternalServerError,
+			fmt.Errorf("Analyse: %w", err)
+	}
+
+	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
+	// ob dort eine echte Engine oder der Mock gerechnet hat.
+	if rm, ok := an.(*katago.Remote); ok {
+		synthetic = rm.Synthetic()
+	}
+
+	// Effektive Werte melden: Query-Parameter (opt) überschreiben
+	// die SGF-Werte – genau wie in teaching.Analyze verwendet.
+	effKomi := game.Komi
+
+	if opt.Komi != nil {
+		effKomi = *opt.Komi
+	}
+
+	effRules := game.Rules
+
+	if opt.Rules != "" {
+		effRules = opt.Rules
+	}
+
+	return analyzeResponse{
+		Size:      game.Size,
+		Komi:      effKomi,
+		Rules:     effRules,
+		Moves:     len(game.Moves),
+		Synthetic: synthetic,
+		Strands:   report.Strands,
+		Reports:   report.Moves,
+	}, http.StatusOK, nil
 }
 
 // computeKeepingAlive führt compute aus. Dauert die Rechnung länger als
