@@ -791,11 +791,33 @@ func TestAnalyzeViaRemoteEngine(t *testing.T) {
 
 	rr := serveEnv(t, req, env)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	// Mit Engine-Host wird nicht mehr synchron gerechnet: Der Auftrag geht
+	// hinüber, die Antwort ist sofort da und trägt nur die ID.
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("Status = %d, erwartet 202. Body: %s", rr.Code, rr.Body.String())
 	}
 
-	resp := decodeAnalyze(t, rr)
+	var accepted analyzeAcceptedReply
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("Antwort kein JSON: %v — Body: %s", err, rr.Body.String())
+	}
+
+	if accepted.JobID == "" || accepted.StatusURL == "" {
+		t.Fatalf("unvollständige Annahme: %+v", accepted)
+	}
+
+	reply := pollJob(t, accepted.StatusURL, env)
+
+	if reply.Status != jobDone {
+		t.Fatalf("Status = %q, Fehler: %s", reply.Status, reply.Error)
+	}
+
+	resp := reply.Result
+
+	if resp == nil {
+		t.Fatal("fertiger Auftrag ohne Ergebnis")
+	}
 
 	if resp.Moves != 10 || len(resp.Reports) != 10 {
 		t.Errorf("Moves = %d, Reports = %d, erwartet je 10",
@@ -804,6 +826,40 @@ func TestAnalyzeViaRemoteEngine(t *testing.T) {
 
 	if !resp.Synthetic {
 		t.Error("synthetic-Flag des Engine-Hosts nicht durchgereicht")
+	}
+}
+
+// pollJob fragt den Auftragsstatus ab, bis er fertig ist. Der Mock rechnet
+// in Millisekunden; das Zeitlimit fängt nur einen hängenden Test ab.
+func pollJob(t *testing.T, statusURL string,
+	env map[string]string) jobStatusReply {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+
+	for {
+		req := httptest.NewRequest(http.MethodGet, statusURL, nil)
+		rr := serveEnv(t, req, env)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Status-Abfrage = %d, Body: %s", rr.Code, rr.Body.String())
+		}
+
+		var reply jobStatusReply
+
+		if err := json.Unmarshal(rr.Body.Bytes(), &reply); err != nil {
+			t.Fatalf("Status kein JSON: %v — Body: %s", err, rr.Body.String())
+		}
+
+		if reply.Status == jobDone || reply.Status == jobError {
+			return reply
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("Auftrag blieb %q", reply.Status)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

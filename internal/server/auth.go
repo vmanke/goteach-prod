@@ -69,10 +69,33 @@ func tokenTTL() (time.Duration, error) {
 	return ttl, nil
 }
 
+// authMandatory meldet, ob offener Betrieb verboten ist
+// (GOTEACH_REQUIRE_AUTH gesetzt und nicht "0"/"false").
+//
+// Bewusst ein ausdrücklicher Schalter statt einer Erkennung der Umgebung:
+// Würde der Dienst selbst raten, ob er „in Produktion" läuft, bräche eine
+// falsche Vermutung das nächste Deployment beim Start — und zwar genau
+// dann, wenn niemand damit rechnet. So entscheidet der Betreiber.
+func authMandatory() bool {
+	v := strings.TrimSpace(os.Getenv("GOTEACH_REQUIRE_AUTH"))
+
+	return v != "" && v != "0" && !strings.EqualFold(v, "false")
+}
+
 // validateAuthEnv prüft die Auth-Umgebung beim Serverstart, damit
 // Fehlkonfiguration sofort auffällt statt erst beim ersten Login.
 func validateAuthEnv() error {
 	if !authEnabled() {
+		// Ohne AUTH_USERS ist /analyze öffentlich. Lokal ist das gewollt;
+		// auf einer öffentlich erreichbaren Maschine, die pro Anfrage
+		// Minuten CPU verbrennt, ist es eine teure Überraschung. Wer
+		// GOTEACH_REQUIRE_AUTH setzt, will lieber gar nicht starten.
+		if authMandatory() {
+			return errors.New(
+				"GOTEACH_REQUIRE_AUTH ist gesetzt, aber AUTH_USERS fehlt — " +
+					"der Dienst würde offen laufen")
+		}
+
 		return nil
 	}
 

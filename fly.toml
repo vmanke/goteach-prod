@@ -28,6 +28,15 @@
 # * auto_stop/auto_start: die Maschine schläft ohne Verkehr und kostet
 #   dann nichts; die erste Anfrage weckt sie (ein paar Sekunden Kaltstart,
 #   zusätzlich zur Analysezeit).
+# * Aufträge liegen im Speicher dieser Maschine (siehe internal/server,
+#   Auftragsbetrieb). Hält sie an, sind laufende Aufträge verloren und
+#   müssen neu gestellt werden. Das Polling des Clients hält sie wach —
+#   wer den Tab schließt, riskiert seinen Auftrag. Wem das zu wackelig
+#   ist, setzt min_machines_running = 1 (kostet dann durchgehend).
+# * Läuft je mehr als eine Maschine, muss die Statusabfrage zu der
+#   Maschine zurück, die rechnet. Dafür trägt die Auftrags-ID die
+#   FLY_MACHINE_ID, und die Abfrage antwortet nötigenfalls mit dem
+#   fly-replay-Header.
 # * CORS: die Vereinsseite ist per Default freigegeben (internal/server);
 #   weitere Absender über GOTEACH_CORS_ORIGINS im [env]-Block.
 
@@ -43,6 +52,18 @@ primary_region = "fra"
   # Geheimnisse — öffentliche Origins, darum hier versioniert statt als
   # Secret: die Vereinsseite unter ihrer Domain und unter Vercel.
   GOTEACH_CORS_ORIGINS = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de,https://flaleer-berlin.vercel.app"
+
+  # Empfohlen, aber bewusst noch nicht aktiv: Mit GOTEACH_REQUIRE_AUTH = "1"
+  # startet der Dienst nicht mehr, wenn AUTH_USERS fehlt — statt still
+  # öffentlich zu laufen und pro Anfrage minutenlang alle Kerne zu binden.
+  #
+  # Vor dem Einschalten prüfen, dass das Secret wirklich gesetzt ist:
+  #
+  #   fly secrets list          # AUTH_USERS und AUTH_JWT_SECRET müssen da sein
+  #
+  # Sonst schlägt der nächste Deploy beim Start fehl — genau das ist der
+  # Zweck, aber es soll niemanden überraschen.
+  # GOTEACH_REQUIRE_AUTH = "1"
 
 [http_service]
   internal_port = 8080
