@@ -233,12 +233,38 @@ func (e *Engine) readLoop(r interface{ Read([]byte) (int, error) }) {
 // (eine pro Turn) ein — effizienter als N Einzel-Queries, da KataGo intern
 // Cache und Batching nutzt.
 func (e *Engine) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
+	out := make([]*Result, 0, len(turns))
+
+	err := e.AnalyzeGameStream(req, turns, func(res *Result) error {
+		out = append(out, res)
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Die Engine antwortet in der Reihenfolge, in der sie fertig wird;
+	// das Interface verspricht aufsteigende TurnNumber.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].TurnNumber < out[j].TurnNumber
+	})
+
+	return out, nil
+}
+
+// AnalyzeGameStream sendet dieselbe Query wie AnalyzeGame, reicht aber
+// jede Antwort sofort an emit weiter, statt sie zu sammeln.
+func (e *Engine) AnalyzeGameStream(req Request, turns []int,
+	emit func(*Result) error) error {
+
 	e.mu.Lock()
 
 	if e.dead != nil {
 		e.mu.Unlock()
 
-		return nil, e.dead
+		return e.dead
 	}
 
 	id := fmt.Sprintf("q%d", e.nextID.Add(1))
@@ -280,12 +306,10 @@ func (e *Engine) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
 	e.wmu.Unlock()
 
 	if err != nil {
-		return nil, fmt.Errorf("katago: Senden fehlgeschlagen: %w", err)
+		return fmt.Errorf("katago: Senden fehlgeschlagen: %w", err)
 	}
 
-	out := make([]*Result, 0, len(turns))
-
-	for len(out) < len(turns) {
+	for received := 0; received < len(turns); received++ {
 		res, ok := <-ch
 
 		if !ok {
@@ -293,25 +317,23 @@ func (e *Engine) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
 			err := e.dead
 			e.mu.Unlock()
 
-			return nil, fmt.Errorf("katago: Verbindung verloren: %w", err)
+			return fmt.Errorf("katago: Verbindung verloren: %w", err)
 		}
 
 		if res.ErrorMsg != "" {
-			return nil, fmt.Errorf("katago: Engine-Fehler: %s", res.ErrorMsg)
+			return fmt.Errorf("katago: Engine-Fehler: %s", res.ErrorMsg)
 		}
 
 		if res.Warning != "" {
 			fmt.Fprintf(os.Stderr, "katago: Warnung: %s\n", res.Warning)
 		}
 
-		out = append(out, res)
+		if err := emit(res); err != nil {
+			return err
+		}
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].TurnNumber < out[j].TurnNumber
-	})
-
-	return out, nil
+	return nil
 }
 
 // Close beendet die Engine. Der Prozess wird bewusst per Kill beendet;

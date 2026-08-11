@@ -17,20 +17,40 @@ type Mock struct{}
 
 func (Mock) Close() error { return nil }
 
-func (Mock) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
+func (m Mock) AnalyzeGame(req Request, turns []int) ([]*Result, error) {
 	out := make([]*Result, 0, len(turns))
+
+	err := m.AnalyzeGameStream(req, turns, func(res *Result) error {
+		out = append(out, res)
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// AnalyzeGameStream rechnet Turn für Turn und gibt jedes Ergebnis sofort
+// weiter — der Mock kann das, weil er ohnehin je Stellung rechnet.
+func (Mock) AnalyzeGameStream(req Request, turns []int,
+	emit func(*Result) error) error {
 
 	for _, t := range turns {
 		res, err := mockAnalyzeTurn(req, t)
 
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		out = append(out, res)
+		if err := emit(res); err != nil {
+			return err
+		}
 	}
 
-	return out, nil
+	return nil
 }
 
 func mockAnalyzeTurn(req Request, turn int) (*Result, error) {

@@ -129,55 +129,14 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 	}
 
 	n := len(g.Moves)
-	from := opt.From
-
-	if from < 1 {
-		from = 1
-	}
-
-	to := opt.To
-
-	if to < from || to > n {
-		to = n
-	}
 
 	if n == 0 {
 		return nil, fmt.Errorf("teaching: Partie enthält keine Züge")
 	}
 
-	req := katago.Request{
-		Rules:     rulesString(g.Rules, opt.Rules),
-		Komi:      g.Komi,
-		Size:      g.Size,
-		MaxVisits: opt.Visits,
-	}
-
-	if opt.Komi != nil {
-		req.Komi = *opt.Komi
-	}
-
-	for _, s := range g.Setup {
-		req.InitialStones = append(req.InitialStones,
-			[2]string{s.Color.String(), board.ToGTP(s.Point, g.Size)})
-	}
-
-	for _, m := range g.Moves {
-		coord := "pass"
-
-		if !m.Pass {
-			coord = board.ToGTP(m.Point, g.Size)
-		}
-
-		req.Moves = append(req.Moves, [2]string{m.Color.String(), coord})
-	}
-
-	// Eine Query, Stellungen from-1 .. to (jeweils "vor Zug i" und "nach
-	// letztem Zug"): Anzahl Analysen = (to-from)+2.
-	turns := make([]int, 0, to-from+2)
-
-	for t := from - 1; t <= to; t++ {
-		turns = append(turns, t)
-	}
+	from, to := moveRange(opt, n)
+	req := analysisRequest(g, opt)
+	turns := analysisTurns(from, to)
 
 	if opt.Progress {
 		fmt.Fprintf(os.Stderr,
@@ -332,6 +291,68 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 	}
 
 	return report, nil
+}
+
+// moveRange normiert From/To auf einen gültigen Zugbereich 1..n.
+func moveRange(opt Options, n int) (from, to int) {
+	from = opt.From
+
+	if from < 1 {
+		from = 1
+	}
+
+	to = opt.To
+
+	if to < from || to > n {
+		to = n
+	}
+
+	return from, to
+}
+
+// analysisRequest baut die Engine-Anfrage zur Partie. Eine Definition für
+// Sammel- und Stromweg: die beiden dürfen sich in der Anfrage nicht
+// unterscheiden, sonst rechneten sie an verschiedenen Partien.
+func analysisRequest(g *board.Game, opt Options) katago.Request {
+	req := katago.Request{
+		Rules:     rulesString(g.Rules, opt.Rules),
+		Komi:      g.Komi,
+		Size:      g.Size,
+		MaxVisits: opt.Visits,
+	}
+
+	if opt.Komi != nil {
+		req.Komi = *opt.Komi
+	}
+
+	for _, s := range g.Setup {
+		req.InitialStones = append(req.InitialStones,
+			[2]string{s.Color.String(), board.ToGTP(s.Point, g.Size)})
+	}
+
+	for _, m := range g.Moves {
+		coord := "pass"
+
+		if !m.Pass {
+			coord = board.ToGTP(m.Point, g.Size)
+		}
+
+		req.Moves = append(req.Moves, [2]string{m.Color.String(), coord})
+	}
+
+	return req
+}
+
+// analysisTurns listet die Stellungen from-1 .. to — je Zug die davor und
+// die danach, also (to-from)+2 Analysen.
+func analysisTurns(from, to int) []int {
+	turns := make([]int, 0, to-from+2)
+
+	for t := from - 1; t <= to; t++ {
+		turns = append(turns, t)
+	}
+
+	return turns
 }
 
 func buildReport(i int, mv board.Move, prev *board.Move, size, total int,
