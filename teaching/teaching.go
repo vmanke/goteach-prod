@@ -349,7 +349,10 @@ func buildReport(i int, mv board.Move, size int, bb, ab *board.Board,
 		rep.BestPV = limit(best.PV, 6)
 	}
 
-	matchesBest := !mv.Pass && rep.BestMove != "" && rep.BestMove == rep.Coord
+	// EqualFold, weil rep.Coord bei Pass "Pass" ist, KataGo aber "pass"
+	// liefert; für gewöhnliche GTP-Koordinaten deckungsgleich mit ==.
+	matchesBest := rep.BestMove != "" &&
+		strings.EqualFold(rep.BestMove, rep.Coord)
 	rep.Category = category(rep.PointsLost, matchesBest)
 
 	if !mv.Pass {
@@ -590,6 +593,14 @@ func lesson(r *MoveReport, matchesBest bool) string {
 			"die Form dieser Stellung."
 
 	case r.PointsLost > 6:
+		// Ohne MoveInfos liefert Result.Best() nil und BestMove bleibt leer;
+		// dann keinen Zug nennen statt einen halben Satz zu erzeugen.
+		if r.BestMove == "" {
+			return "Große Verluste entstehen meist, weil der größte Punkt " +
+				"übersehen wird — suchen Sie vor dem Zug die dringendste " +
+				"Gruppe und die größte offene Stelle."
+		}
+
 		return fmt.Sprintf("Große Verluste entstehen meist, weil der größte "+
 			"Punkt übersehen wird — vergleichen Sie Ihren Zug mit %s.",
 			r.BestMove)
