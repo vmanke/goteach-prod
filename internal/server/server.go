@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -459,15 +460,67 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Erst kodieren, dann schreiben: encoding/json verweigert NaN/±Inf
+	// komplett — mit Encoder direkt auf w bliebe dem Client dann ein Body
+	// aus lauter Füllzeichen ohne jedes JSON. Die Werte werden vorab
+	// bereinigt (eine Engine-Zahl außerhalb der Mathematik ist "kein
+	// Ergebnis", nicht "kein Body"), und selbst ein danach noch
+	// scheiternder Marshal wird zu einem lesbaren Fehlerobjekt.
+	body, err := json.MarshalIndent(sanitizedResponse(resp), "", "  ")
+
+	if err != nil {
+		log.Printf("goteach-server: JSON-Antwort: %v", err)
+
+		body = []byte(`{"error":"interner Fehler beim Kodieren der Antwort"}`)
+	}
+
 	if !started {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
+	_, _ = w.Write(append(body, '\n'))
+}
 
-	if err := enc.Encode(resp); err != nil {
-		log.Printf("goteach-server: JSON-Antwort: %v", err)
+// sanitizedResponse ersetzt NaN und ±Inf in allen Gleitkommafeldern der
+// Antwort rekursiv durch 0. encoding/json kann diese Werte nicht
+// darstellen, und aus einer Engine können sie in Randlagen kommen.
+func sanitizedResponse(resp analyzeResponse) analyzeResponse {
+	sanitizeFloats(reflect.ValueOf(&resp).Elem())
+
+	return resp
+}
+
+func sanitizeFloats(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Float32, reflect.Float64:
+		if f := v.Float(); (math.IsNaN(f) || math.IsInf(f, 0)) && v.CanSet() {
+			v.SetFloat(0)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Field(i).CanSet() {
+				sanitizeFloats(v.Field(i))
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			sanitizeFloats(v.Index(i))
+		}
+	case reflect.Map:
+		for _, key := range v.MapKeys() {
+			entry := v.MapIndex(key)
+
+			if entry.Kind() == reflect.Float64 || entry.Kind() == reflect.Float32 {
+				if f := entry.Float(); math.IsNaN(f) || math.IsInf(f, 0) {
+					v.SetMapIndex(key, reflect.ValueOf(0.0))
+				}
+			}
+		}
+	case reflect.Ptr:
+		if !v.IsNil() {
+			sanitizeFloats(v.Elem())
+		}
+	default:
 	}
 }
 
@@ -493,6 +546,17 @@ func computeKeepingAlive(
 	done := make(chan outcome, 1)
 
 	go func() {
+		// Die Rechnung läuft nicht mehr im Handler-Goroutine, also fängt
+		// withRecover ihre Panics nicht — ohne dieses Netz risse eine
+		// Panic den ganzen Serverprozess mit allen Verbindungen um.
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("goteach-server: Panic in der Analyse: %v", rec)
+				done <- outcome{analyzeResponse{}, http.StatusInternalServerError,
+					fmt.Errorf("interner Fehler in der Analyse")}
+			}
+		}()
+
 		r, s, err := compute()
 		done <- outcome{r, s, err}
 	}()

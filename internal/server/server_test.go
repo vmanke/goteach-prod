@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vmanke/goteach-prod/internal/auth"
+	"github.com/vmanke/goteach-prod/teaching"
 )
 
 const demoSGF = "(;GM[1]FF[4]SZ[19]KM[7.5]RU[Chinese]" +
@@ -995,3 +997,58 @@ func TestComputeKeepingAliveFastPathWritesNothing(t *testing.T) {
 }
 
 var errComputeFailed = errors.New("kaputt")
+
+// Eine Panic in der ausgelagerten Rechnung darf den Prozess nicht mehr
+// umreißen: sie wird im Goroutine gefangen und kommt als Fehler zurück.
+func TestComputeKeepingAliveSurvivesAPanic(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	_, status, _, err := computeKeepingAlive(rr, time.Hour, "\n",
+		func() (analyzeResponse, int, error) {
+			panic("kaputte Analyse")
+		})
+
+	if err == nil || !strings.Contains(err.Error(), "interner Fehler") {
+		t.Fatalf("err = %v, erwartet interner Fehler", err)
+	}
+
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, erwartet 500", status)
+	}
+}
+
+// NaN und ±Inf aus der Engine dürfen die JSON-Antwort nicht verhindern —
+// encoding/json verweigert sie komplett, und der Client sähe nach den
+// Heartbeat-Füllzeichen einen leeren Body ("unexpected end of data").
+func TestNaNAndInfAreSanitizedOutOfTheResponse(t *testing.T) {
+	resp := analyzeResponse{
+		Size: 19,
+		Komi: math.NaN(),
+		Reports: []teaching.MoveReport{{
+			PointsLost:    math.Inf(1),
+			WinrateBefore: math.NaN(),
+			WinrateAfter:  0.5,
+		}},
+		Strands: []teaching.Strand{{
+			PointsLost: map[string]float64{"Schwarz": math.Inf(-1)},
+		}},
+	}
+
+	clean := sanitizedResponse(resp)
+
+	body, err := json.Marshal(clean)
+
+	if err != nil {
+		t.Fatalf("Marshal nach Bereinigung: %v", err)
+	}
+
+	if clean.Komi != 0 || clean.Reports[0].PointsLost != 0 ||
+		clean.Reports[0].WinrateBefore != 0 ||
+		clean.Strands[0].PointsLost["Schwarz"] != 0 {
+		t.Fatalf("nicht bereinigt: %s", body)
+	}
+
+	if clean.Reports[0].WinrateAfter != 0.5 {
+		t.Fatal("ein endlicher Wert wurde verändert")
+	}
+}
