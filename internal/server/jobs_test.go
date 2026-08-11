@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // engineEnv ist die Umgebung eines Engine-Hosts (rechnet selbst, hier mit
@@ -88,11 +90,16 @@ func TestEngineJobLifecycle(t *testing.T) {
 	}
 }
 
-// pollEngineJob fragt den Auftrag auf dem Engine-Host ab, bis er fertig ist.
+// pollEngineJob fragt den Auftrag auf dem Engine-Host ab, bis er fertig
+// ist. Deadline statt fester Rundenzahl, mit kurzer Pause dazwischen: Eine
+// Zählschleife ohne Schlaf verbrennt CPU und wäre obendrein flaky — sie
+// gibt auf, wenn dem Worker nur Millisekunden fehlen.
 func pollEngineJob(t *testing.T, id string) jobStatusReply {
 	t.Helper()
 
-	for i := 0; i < 1000; i++ {
+	deadline := time.Now().Add(10 * time.Second)
+
+	for {
 		req := httptest.NewRequest(http.MethodGet, "/engine/jobs?id="+id, nil)
 		req.Header.Set("Authorization", "Bearer tok")
 
@@ -111,11 +118,13 @@ func pollEngineJob(t *testing.T, id string) jobStatusReply {
 		if reply.Status == jobDone || reply.Status == jobError {
 			return reply
 		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("Auftrag blieb %q", reply.Status)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
-
-	t.Fatal("Auftrag wurde nicht fertig")
-
-	return jobStatusReply{}
 }
 
 // Unbekannte ID → 404 mit Hinweis, statt stiller leerer Antwort.
@@ -240,5 +249,86 @@ func TestAnalyzeStatusHTMLPage(t *testing.T) {
 	if !strings.Contains(body, "http-equiv=\"refresh\"") &&
 		!strings.Contains(body, "Analyse fertig") {
 		t.Fatalf("Seite lädt weder nach noch zeigt sie ein Ergebnis:\n%s", body)
+	}
+}
+
+// Fertige Aufträge dürfen keine neuen blockieren. Vorher zählte add die
+// gesamte Map, sodass nach maxLiveJobs Analysen eine halbe Stunde lang
+// jeder neue Auftrag 429 bekam — obwohl die Maschine längst frei war.
+func TestFinishedJobsDoNotBlockNewOnes(t *testing.T) {
+	store := newJobStore()
+
+	// Mehr fertige Aufträge ablegen, als die Warteschlange zulässt.
+	for i := 0; i < maxLiveJobs+5; i++ {
+		j := &job{
+			ID:      "fertig-" + strconv.Itoa(i),
+			Status:  jobDone,
+			Created: time.Now(),
+			Done:    time.Now(),
+		}
+
+		if !store.add(j) {
+			t.Fatalf("fertiger Auftrag %d wurde abgewiesen", i)
+		}
+	}
+
+	if !store.add(&job{ID: "neu", Status: jobPending, Created: time.Now()}) {
+		t.Fatal("neuer Auftrag abgewiesen, obwohl nur fertige vorliegen")
+	}
+}
+
+// Offene Aufträge zählen dagegen sehr wohl: Über der Grenze wird
+// abgewiesen, statt eine Schlange anzunehmen, die niemand mehr abholt.
+func TestOpenJobsHitTheLimit(t *testing.T) {
+	store := newJobStore()
+
+	for i := 0; i < maxLiveJobs; i++ {
+		j := &job{
+			ID:      "offen-" + strconv.Itoa(i),
+			Status:  jobPending,
+			Created: time.Now(),
+		}
+
+		if !store.add(j) {
+			t.Fatalf("offener Auftrag %d unter der Grenze abgewiesen", i)
+		}
+	}
+
+	if store.add(&job{ID: "zuviel", Status: jobPending, Created: time.Now()}) {
+		t.Fatalf("Auftrag %d+1 wurde angenommen, erwartet Abweisung", maxLiveJobs)
+	}
+}
+
+// Der Speicher bleibt trotzdem begrenzt: Über maxRetainedJobs fliegen die
+// ältesten FERTIGEN Aufträge hinaus.
+func TestRetentionTrimsOldestFinished(t *testing.T) {
+	store := newJobStore()
+	base := time.Now().Add(-time.Hour)
+
+	for i := 0; i < maxRetainedJobs+10; i++ {
+		// Done aufsteigend, damit "ältester" eindeutig ist; TTL-Eviction
+		// greift nicht, weil evictLocked auf jobTTL prüft.
+		store.add(&job{
+			ID:      "j-" + strconv.Itoa(i),
+			Status:  jobDone,
+			Created: base,
+			Done:    time.Now().Add(time.Duration(i) * time.Millisecond),
+		})
+	}
+
+	if len(store.jobs) > maxRetainedJobs {
+		t.Fatalf("%d Aufträge vorgehalten, Grenze ist %d",
+			len(store.jobs), maxRetainedJobs)
+	}
+
+	// Der älteste muss weg sein, ein junger noch da.
+	if _, ok := store.jobs["j-0"]; ok {
+		t.Error("ältester fertiger Auftrag wurde nicht verworfen")
+	}
+
+	last := "j-" + strconv.Itoa(maxRetainedJobs+9)
+
+	if _, ok := store.jobs[last]; !ok {
+		t.Errorf("jüngster Auftrag %q fehlt", last)
 	}
 }

@@ -38,9 +38,20 @@ import (
 // Speicher einer schlafenden Maschine nicht vollläuft.
 const jobTTL = 30 * time.Minute
 
-// maxLiveJobs deckelt die Warteschlange. Darüber wird abgewiesen, statt
-// Aufträge anzunehmen, die ohnehin niemand mehr rechtzeitig bekommt.
+// maxLiveJobs deckelt die WARTESCHLANGE, also offene Aufträge. Darüber
+// wird abgewiesen, statt Aufträge anzunehmen, die ohnehin niemand mehr
+// rechtzeitig bekommt.
+//
+// Bewusst nur offene: Fertige Aufträge liegen bis zur TTL herum, damit
+// der Client sie abholen kann. Zählte man sie mit, blockierten sie nach
+// 32 Analysen jede neue Arbeit für eine halbe Stunde — obwohl die
+// Maschine längst wieder frei ist.
 const maxLiveJobs = 32
+
+// maxRetainedJobs begrenzt zusätzlich den Speicher: So viele Aufträge
+// werden insgesamt vorgehalten, danach fliegen die ältesten fertigen
+// hinaus, auch wenn ihre TTL noch läuft.
+const maxRetainedJobs = 256
 
 // Auftragszustände.
 const (
@@ -128,7 +139,7 @@ func replayTarget(id string) string {
 // evictLocked entfernt abgelaufene Aufträge; Aufrufer hält die Sperre.
 func (s *jobStore) evictLocked(now time.Time) {
 	for id, j := range s.jobs {
-		if j.Status != jobDone && j.Status != jobError {
+		if !j.finished() {
 			continue
 		}
 
@@ -138,18 +149,59 @@ func (s *jobStore) evictLocked(now time.Time) {
 	}
 }
 
-// add legt einen Auftrag an; false heißt: Warteschlange voll.
+// finished meldet, ob der Auftrag nicht mehr rechnet.
+func (j *job) finished() bool {
+	return j.Status == jobDone || j.Status == jobError
+}
+
+// trimLocked wirft die ältesten fertigen Aufträge weg, bis die Menge
+// wieder unter maxRetainedJobs liegt; Aufrufer hält die Sperre.
+func (s *jobStore) trimLocked() {
+	for len(s.jobs) > maxRetainedJobs {
+		var oldestID string
+		var oldest time.Time
+
+		for id, j := range s.jobs {
+			if !j.finished() {
+				continue
+			}
+
+			if oldestID == "" || j.Done.Before(oldest) {
+				oldestID, oldest = id, j.Done
+			}
+		}
+
+		// Nur offene Aufträge übrig: die dürfen nicht weg, sie rechnen
+		// noch oder warten. maxLiveJobs deckelt sie ohnehin.
+		if oldestID == "" {
+			return
+		}
+
+		delete(s.jobs, oldestID)
+	}
+}
+
+// add legt einen Auftrag an; false heißt: zu viele OFFENE Aufträge.
 func (s *jobStore) add(j *job) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.evictLocked(time.Now())
 
-	if len(s.jobs) >= maxLiveJobs {
+	open := 0
+
+	for _, existing := range s.jobs {
+		if !existing.finished() {
+			open++
+		}
+	}
+
+	if open >= maxLiveJobs {
 		return false
 	}
 
 	s.jobs[j.ID] = j
+	s.trimLocked()
 
 	return true
 }
