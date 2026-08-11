@@ -26,7 +26,11 @@
           "new": true
         }
       ],
-      "text": "Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Schwarz: 50.0 % → 77.5 %.\nEngine-Erstwahl: A19.\nSchwarze Kette um Q16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.00 → 0.38.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "E wie Expansion: Um Q16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.\nQ16 liegt wie die Erstwahl A19 auf Stufe E.\nSchwarze Kette um Q16: Stärke 0.00 → 0.38."
     },
     {
       "number": 2,
@@ -51,7 +55,11 @@
           "new": true
         }
       ],
-      "text": "Zug 2 — Weiß D4 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Weiß: 22.5 % → 50.0 %.\nEngine-Erstwahl: Q18.\nWeiße Kette um D4 (1 Stein(e), 4 Freiheit(en)): Stärke -0.00 → 0.38.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "R geprüft: keine eigene Gruppe in Not — das Tenuki ist erlaubt.\nD4 liegt wie die Erstwahl Q18 auf Stufe E.\nWeiße Kette um D4: Stärke -0.00 → 0.38."
     },
     {
       "number": 3,
@@ -76,7 +84,11 @@
           "new": true
         }
       ],
-      "text": "Zug 3 — Schwarz Q3 [ausgezeichnet, +11.9 Pkt]. Gewinnchance Schwarz: 50.0 % → 74.0 %.\nEngine-Erstwahl: O16.\nSchwarze Kette um Q3 (1 Stein(e), 4 Freiheit(en)): Stärke -0.01 → 0.38.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "R geprüft: keine eigene Gruppe in Not — das Tenuki ist erlaubt.\nQ3 liegt wie die Erstwahl O16 auf Stufe E.\nSchwarze Kette um Q3: Stärke -0.01 → 0.38."
     },
     {
       "number": 4,
@@ -101,7 +113,11 @@
           "new": true
         }
       ],
-      "text": "Zug 4 — Weiß D16 [ausgezeichnet, +12.6 Pkt]. Gewinnchance Weiß: 26.0 % → 51.6 %.\nEngine-Erstwahl: G4.\nWeiße Kette um D16 (1 Stein(e), 4 Freiheit(en)): Stärke -0.00 → 0.37.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "E wie Expansion: Um D16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.\nD16 liegt wie die Erstwahl G4 auf Stufe E.\nWeiße Kette um D16: Stärke -0.00 → 0.37."
     },
     {
       "number": 5,
@@ -126,7 +142,11 @@
           "new": true
         }
       ],
-      "text": "Zug 5 — Schwarz R9 [ausgezeichnet, +7.3 Pkt]. Gewinnchance Schwarz: 48.4 % → 64.4 %.\nEngine-Erstwahl: G16.\nSchwarze Kette um R9 (1 Stein(e), 4 Freiheit(en)): Stärke 0.19 → 0.43.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "R9 liegt wie die Erstwahl G16 auf Stufe E."
     },
     {
       "number": 6,
@@ -151,7 +171,11 @@
           "new": true
         }
       ],
-      "text": "Zug 6 — Weiß O17 [ausgezeichnet, +11.8 Pkt]. Gewinnchance Weiß: 35.6 % → 61.5 %.\nEngine-Erstwahl: G16.\nWeiße Kette um O17 (1 Stein(e), 4 Freiheit(en)): Stärke -0.28 → 0.09.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "O17 liegt wie die Erstwahl G16 auf Stufe E.\nWeiße Kette um O17: Stärke -0.28 → 0.09."
     },
     {
       "number": 7,
@@ -176,7 +200,11 @@
           "new": true
         }
       ],
-      "text": "Zug 7 — Schwarz Q14 [ausgezeichnet, +3.2 Pkt]. Gewinnchance Schwarz: 38.5 % → 45.6 %.\nEngine-Erstwahl: P17.\nSchwarze Kette um Q14 (1 Stein(e), 4 Freiheit(en)): Stärke 0.18 → 0.28.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "Q14 liegt wie die Erstwahl P17 auf Stufe E.\nForm: Ein-Punkt-Sprung (Q16 Q14) — der Sprung über einen Punkt gilt als nie schlecht — er ist schnell und bleibt verbunden."
     },
     {
       "number": 8,
@@ -201,7 +229,11 @@
           "new": true
         }
       ],
-      "text": "Zug 8 — Weiß K16 [ausgezeichnet, +6.1 Pkt]. Gewinnchance Weiß: 54.4 % → 67.2 %.\nEngine-Erstwahl: P17.\nWeiße Kette um K16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.12 → 0.31.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "E wie Endgame: Keine Gruppe in Not — jetzt zählt die exakte Punktgröße jedes Zuges.\nK16 liegt wie die Erstwahl P17 auf Stufe E."
     },
     {
       "number": 9,
@@ -226,7 +258,11 @@
           "new": true
         }
       ],
-      "text": "Zug 9 — Schwarz C14 [ausgezeichnet, +12.4 Pkt]. Gewinnchance Schwarz: 32.8 % → 59.7 %.\nEngine-Erstwahl: P17.\nSchwarze Kette um C14 (1 Stein(e), 4 Freiheit(en)): Stärke -0.34 → 0.04.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "C14 liegt wie die Erstwahl P17 auf Stufe E.\nSchwarze Kette um C14: Stärke -0.34 → 0.04."
     },
     {
       "number": 10,
@@ -251,7 +287,11 @@
           "new": true
         }
       ],
-      "text": "Zug 10 — Weiß C12 [ausgezeichnet, +6.6 Pkt]. Gewinnchance Weiß: 40.3 % → 54.9 %.\nEngine-Erstwahl: P17.\nWeiße Kette um C12 (1 Stein(e), 4 Freiheit(en)): Stärke -0.06 → 0.19.\nMerksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt."
+      "rose": {
+        "played": "E",
+        "best": "E"
+      },
+      "text": "C12 liegt wie die Erstwahl P17 auf Stufe E."
     }
   ]
 }

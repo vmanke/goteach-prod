@@ -109,10 +109,21 @@ func refine(g *board.Game, an katago.Analyzer, opt Options, req katago.Request,
 			continue
 		}
 
-		report.Moves[i] = buildReport(index, g.Moves[index], g.Size,
-			positions[index], positions[index+1], before, after, opt.Tau)
+		var prev *board.Move
+
+		if index > 0 {
+			prev = &g.Moves[index-1]
+		}
+
+		report.Moves[i] = buildReport(index, g.Moves[index], prev, g.Size,
+			len(g.Moves), positions[index], positions[index+1],
+			before, after, opt.Tau)
 		refined++
 	}
+
+	// Die Texte hängen über den Dedup-Zustand am ganzen Spiel — nach dem
+	// Neuaufbau einzelner Züge muss der Gesamtpass erneut laufen.
+	composeTexts(report.Moves)
 
 	recomputeStrandFacts(report)
 
