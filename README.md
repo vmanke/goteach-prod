@@ -7,7 +7,8 @@ vorliegen und KataGo darauf rechnet. Kernfeature bleibt **Teaching pro Zug**:
 Für jeden Zug einer SGF-Partie entsteht eine deutsche Lehreinheit mit
 Bewertungskategorie, Punktverlust, Gewinnchancen-Verlauf, Engine-Erstwahl
 samt Variante, Gruppeneffekten (Stärke, Atari, Schlagen, Benson-Status)
-und einem faktenbasierten Merksatz.
+und einem Lehrtext entlang der ROSE-Checkliste (R Respond, O Offense,
+S Status/Shape, E Expansion/Endgame — Dringlichkeit geht vor Größe).
 
 ## Pakete
 
@@ -79,10 +80,10 @@ Beispielausgabe (aus der **Mock**-Demo; Zahlen daher synthetisch):
 ```
 Keine Erzählstränge gefunden — die Partie verlief ohne erkennbar zusammenhängende Kämpfe.
 
-Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt]. Gewinnchance Schwarz: 50.0 % → 77.5 %.
-Engine-Erstwahl: A19.
-Schwarze Kette um Q16 (1 Stein(e), 4 Freiheit(en)): Stärke 0.00 → 0.38.
-Merksatz: Solide. Beobachten Sie, wie sich die Ownership in der Umgebung des Zuges verschiebt.
+Zug 1 — Schwarz Q16 [ausgezeichnet, +14.2 Pkt] · ROSE E
+E wie Expansion: Um Q16 ist das Brett noch offen — solange nichts drängt, ist der größte freie Raum der Maßstab.
+Q16 liegt wie die Erstwahl A19 auf Stufe E.
+Schwarze Kette um Q16: Stärke 0.00 → 0.38.
 
 Zusammenfassung
 ---------------
@@ -569,9 +570,22 @@ Mit `-moves` lässt sich der Feinschliff pro Zug weiterhin dazuschalten.
   `s = Σ e^(−d/τ) · sign(Farbe) · ownership_black  /  Σ e^(−d/τ)`
   mit Multi-Source-BFS-Distanz d zur Kette — die neuronal fundierte Variante
   klassischer Einflussmodelle.
-- Merksatz-Priorität (rein faktenbasiert): eigenes Atari > Schlagen >
-  gegnerisches Atari > Eigenschwächung (Δ ≥ 0.15) > Engine-Match >
-  Verlust > 6 Pkt > Verlust > 1.5 Pkt > Standardhinweis.
+- Lehrtext (ROSE): Jede Stellung wird VOR dem Zug gegen die Checkliste
+  gehalten — R Respond (Not an eigenen Ketten neben dem letzten Zug:
+  Atari, Zwei-Freiheiten-Schwäche, gelesene Leiter/Netz), O Offense
+  (schwache gegnerische Ketten: Stärke ≤ 0.25, ≤ 4 Freiheiten, nicht
+  Benson), S Status/Shape (dasselbe auf eigenen Ketten; neu gebildetes
+  leeres Dreieck), E Expansion/Endgame (Fallback; „offen" = mittlere
+  |Ownership| ≤ 0.35 im 5×5-Umfeld). Gespielter Zug und Engine-Erstwahl
+  werden gegen dieselben Befunde eingestuft; spielt der Zug eine weniger
+  dringliche Stufe als die Erstwahl, nennt der Text die goldene Regel
+  „Dringlichkeit geht vor Größe".
+- Wiederholungs-Unterdrückung (compose.go, ein Pass über die Partie):
+  gleicher Befund schweigt 5 Züge (R-Atari nie), goldene Regel mit
+  mindestens 8 Zügen Abstand (außer ab Kategorie „Fehler"),
+  Abschluss-Formulierungen je 2× pro Partie, Ketten-Sätze nur bei
+  Ereignis (Schlagen, Atari, Benson-Übergang, |ΔStärke| ≥ 0.25,
+  ≤ 2 Freiheiten); die JSON-Effects bleiben immer vollständig.
 
 ## Teststand
 

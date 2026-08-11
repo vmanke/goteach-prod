@@ -256,6 +256,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, "ok\n")
 }
 
+// setupStone ist ein Vorgabestein (Handicap, SGF AB/AW) in der Antwort.
+type setupStone struct {
+	Player string `json:"player"` // "Schwarz" | "Weiß"
+	Coord  string `json:"coord"`  // GTP
+}
+
 // analyzeResponse ist die JSON-Antwort von POST /analyze.
 type analyzeResponse struct {
 	Size      int     `json:"size"`
@@ -263,6 +269,9 @@ type analyzeResponse struct {
 	Rules     string  `json:"rules,omitempty"`
 	Moves     int     `json:"moves"`
 	Synthetic bool    `json:"synthetic"`
+	// Setup sind die vorab gesetzten Steine — ohne sie kann kein Client
+	// die Partie auf einem Brett nachspielen.
+	Setup []setupStone `json:"setup,omitempty"`
 	// Strands ist die Hauptsicht auf eine Partie: zusammenhängende
 	// Abschnitte statt einer Wand aus Einzelzügen. Reports bleibt als
 	// Detailebene darunter erhalten.
@@ -542,12 +551,28 @@ func computeAnalysis(game *board.Game, opt teaching.Options,
 		effRules = opt.Rules
 	}
 
+	var setup []setupStone
+
+	for _, s := range game.Setup {
+		player := "Schwarz"
+
+		if s.Color == board.White {
+			player = "Weiß"
+		}
+
+		setup = append(setup, setupStone{
+			Player: player,
+			Coord:  board.ToGTP(s.Point, game.Size),
+		})
+	}
+
 	return analyzeResponse{
 		Size:      game.Size,
 		Komi:      effKomi,
 		Rules:     effRules,
 		Moves:     len(game.Moves),
 		Synthetic: synthetic,
+		Setup:     setup,
 		Strands:   report.Strands,
 		Reports:   report.Moves,
 	}, http.StatusOK, nil
@@ -640,11 +665,25 @@ func cleanRecordField(s string) string {
 	}, s)
 }
 
-// linesBody baut die Analyse als Kompaktformat: ein Kopfsatz
-// H|size|komi|rules|moves|synthetic, dann je Zug ein Satz
-// M|number|player|coord|category|pointsLost|winrateBefore|winrateAfter|bestMove|text.
-// Zahlen mit fester Präzision, Text von Steuerzeichen befreit — der
-// Client darf splitten statt parsen.
+// linesVersion ist die Formatversion des V-Satzes. Version 2 ergänzt
+// V/P/S; Clients, die kein V ≥ 2 sehen, dürfen kein Brett nachspielen —
+// ein Alt-Server ohne P-Sätze ließe eine Handicap-Partie falsch aussehen.
+const linesVersion = 2
+
+// linesBody baut die Analyse als Kompaktformat in der Satzfolge
+// H, V, P*, M*, S*:
+//
+//	H|size|komi|rules|moves|synthetic
+//	V|version
+//	P|player|coord                       je Vorgabestein (AB/AW, Handicap)
+//	M|number|player|coord|category|pointsLost|winrateBefore|winrateAfter|bestMove|text
+//	S|id|area|from|to|count|movesCSV|lostBlack|lostWhite|captures|worstNumber|worstCoord|worstCategory|worstLost|shapes|text
+//
+// H- und M-Sätze bleiben bei exakt 6 bzw. 10 Feldern — Bestandsclients
+// destrukturieren beide hart. Unbekannte Satztypen überspringt der Client
+// still; neue Informationen kommen deshalb als neue Sätze, nie als neue
+// Felder bestehender Sätze. Zahlen mit fester Präzision, Text von
+// Steuerzeichen befreit — der Client darf splitten statt parsen.
 func linesBody(resp analyzeResponse) string {
 	record := func(fields ...string) string {
 		for i, f := range fields {
@@ -662,6 +701,12 @@ func linesBody(resp analyzeResponse) string {
 		strconv.Itoa(resp.Moves),
 		strconv.FormatBool(resp.Synthetic),
 	)}
+
+	records = append(records, record("V", strconv.Itoa(linesVersion)))
+
+	for _, s := range resp.Setup {
+		records = append(records, record("P", s.Player, s.Coord))
+	}
 
 	for i := range resp.Reports {
 		m := &resp.Reports[i]
@@ -685,7 +730,59 @@ func linesBody(resp analyzeResponse) string {
 		))
 	}
 
+	for i := range resp.Strands {
+		records = append(records, strandRecord(record, &resp.Strands[i]))
+	}
+
 	return strings.Join(records, linesRecordSep)
+}
+
+// strandRecord baut den S-Satz eines Erzählstrangs (16 Felder).
+func strandRecord(record func(...string) string, s *teaching.Strand) string {
+	moves := make([]string, len(s.Moves))
+
+	for i, n := range s.Moves {
+		moves[i] = strconv.Itoa(n)
+	}
+
+	// Formnamen dedupliziert in Erstnennungs-Reihenfolge.
+	var names []string
+	seen := map[string]bool{}
+
+	for _, sh := range s.Shapes {
+		if !seen[sh.Name] {
+			seen[sh.Name] = true
+			names = append(names, sh.Name)
+		}
+	}
+
+	worstNumber, worstCoord, worstCategory, worstLost := 0, "", "", 0.0
+
+	if s.Worst != nil {
+		worstNumber = s.Worst.Number
+		worstCoord = s.Worst.Coord
+		worstCategory = s.Worst.Category
+		worstLost = s.Worst.PointsLost
+	}
+
+	return record(
+		"S",
+		strconv.Itoa(s.ID),
+		s.Area,
+		strconv.Itoa(s.FromMove),
+		strconv.Itoa(s.ToMove),
+		strconv.Itoa(len(s.Moves)),
+		strings.Join(moves, ","),
+		strconv.FormatFloat(s.PointsLost["Schwarz"], 'f', 1, 64),
+		strconv.FormatFloat(s.PointsLost["Weiß"], 'f', 1, 64),
+		strconv.Itoa(s.Captures),
+		strconv.Itoa(worstNumber),
+		worstCoord,
+		worstCategory,
+		strconv.FormatFloat(worstLost, 'f', 1, 64),
+		strings.Join(names, ","),
+		s.Text,
+	)
 }
 
 // startAnalyzer liefert die Engine dieser Instanz. Eine lokale Binary

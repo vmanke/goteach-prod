@@ -33,8 +33,8 @@ func TestAnalyzeWithMock(t *testing.T) {
 			t.Fatalf("unvollständiger Report: %+v", r)
 		}
 
-		if !strings.Contains(r.Text, "Merksatz:") {
-			t.Fatalf("Merksatz fehlt in Zug %d", r.Number)
+		if r.Rose == nil || r.Rose.Played == "" {
+			t.Fatalf("ROSE-Einstufung fehlt in Zug %d", r.Number)
 		}
 
 		if r.WinrateBefore < 0 || r.WinrateBefore > 1 {

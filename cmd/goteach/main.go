@@ -166,6 +166,21 @@ func run() error {
 	if *withMoves {
 		for i := range report.Moves {
 			r := &report.Moves[i]
+
+			// Kopfzeile aus den strukturierten Feldern — der Lehrtext selbst
+			// wiederholt diese Zahlen seit dem ROSE-Umbau nicht mehr.
+			rose := ""
+
+			if r.Rose != nil {
+				rose = " · ROSE " + r.Rose.Played
+
+				if r.Rose.Best != "" && r.Rose.Best != r.Rose.Played {
+					rose += " (Erstwahl " + r.Rose.Best + ")"
+				}
+			}
+
+			fmt.Printf("Zug %d — %s %s [%s, %+.1f Pkt]%s\n",
+				r.Number, r.Player, r.Coord, r.Category, -r.PointsLost, rose)
 			fmt.Println(r.Text)
 
 			if r.TextLLM != "" {

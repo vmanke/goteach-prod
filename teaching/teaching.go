@@ -67,6 +67,9 @@ type GroupEffect struct {
 	Captured       bool    `json:"captured,omitempty"`
 	InAtari        bool    `json:"inAtari,omitempty"`
 	UncondAlive    bool    `json:"uncondAlive,omitempty"`
+	// UncondAliveBefore hält den Benson-Status VOR dem Zug fest — erst der
+	// Übergang (tot → unbedingt lebendig) ist ein erzählenswertes Ereignis.
+	UncondAliveBefore bool `json:"uncondAliveBefore,omitempty"`
 }
 
 // MoveReport ist die Lehreinheit zu genau einem Zug.
@@ -82,8 +85,14 @@ type MoveReport struct {
 	BestMove      string        `json:"bestMove,omitempty"`
 	BestPV        []string      `json:"bestPV,omitempty"`
 	Effects       []GroupEffect `json:"effects,omitempty"`
-	Text          string        `json:"text"`
-	TextLLM       string        `json:"textLLM,omitempty"`
+	// Rose ist die Einstufung des Zuges in die ROSE-Checkliste (rose.go).
+	Rose    *RoseFacts `json:"rose,omitempty"`
+	Text    string     `json:"text"`
+	TextLLM string     `json:"textLLM,omitempty"`
+
+	// rose trägt das Zwischenmaterial der Einstufung von buildReport zu
+	// composeTexts; unexportiert und ohne JSON-Abbild.
+	rose *roseDetail
 }
 
 // Analyze erstellt Teaching-Reports für die Züge [From..To] der Partie.
@@ -209,23 +218,36 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 		mv := g.Moves[i]
 		before := byTurn[i]
 		after := byTurn[i+1]
-		rep := buildReport(i, mv, g.Size, positions[i], positions[i+1],
-			before, after, opt.Tau)
 
-		if opt.Polish != nil {
-			if txt, perr := opt.Polish(&rep); perr == nil {
-				rep.TextLLM = txt
-			} else {
-				fmt.Fprintf(os.Stderr,
-					"teaching: LLM-Feinschliff Zug %d übersprungen: %v\n",
-					rep.Number, perr)
-			}
+		var prev *board.Move
+
+		if i > 0 {
+			prev = &g.Moves[i-1]
 		}
+
+		rep := buildReport(i, mv, prev, g.Size, n, positions[i], positions[i+1],
+			before, after, opt.Tau)
 
 		reports = append(reports, rep)
 
 		if opt.Progress && (i+1)%10 == 0 {
 			fmt.Fprintf(os.Stderr, "teaching: Zug %d/%d fertig\n", i+1, to)
+		}
+	}
+
+	// Texte entstehen in einem Pass über die ganze Partie, nicht je Zug —
+	// die Wiederholungs-Unterdrückung braucht Spielgedächtnis (compose.go).
+	composeTexts(reports)
+
+	if opt.Polish != nil {
+		for idx := range reports {
+			if txt, perr := opt.Polish(&reports[idx]); perr == nil {
+				reports[idx].TextLLM = txt
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"teaching: LLM-Feinschliff Zug %d übersprungen: %v\n",
+					reports[idx].Number, perr)
+			}
 		}
 	}
 
@@ -312,8 +334,8 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 	return report, nil
 }
 
-func buildReport(i int, mv board.Move, size int, bb, ab *board.Board,
-	before, after *katago.Result, tau float64) MoveReport {
+func buildReport(i int, mv board.Move, prev *board.Move, size, total int,
+	bb, ab *board.Board, before, after *katago.Result, tau float64) MoveReport {
 
 	moverBlack := mv.Color == board.Black
 	persp := func(wBlack float64) float64 {
@@ -360,7 +382,12 @@ func buildReport(i int, mv board.Move, size int, bb, ab *board.Board,
 			before.Ownership, after.Ownership, tau)
 	}
 
-	rep.Text = renderText(&rep, matchesBest)
+	// Die ROSE-Einstufung liefert Fakten und Zwischenmaterial; der Text
+	// selbst entsteht erst im Spiel-Pass (composeTexts), weil die
+	// Wiederholungs-Unterdrückung die ganze Partie sehen muss.
+	rep.Rose, rep.rose = assessRose(mv, prev, size, bb, ab,
+		before.Ownership, after.Ownership, tau, rep.BestMove, matchesBest,
+		total, rep.Number)
 
 	return rep
 }
@@ -411,6 +438,26 @@ func collectEffects(mv board.Move, size int, bb, ab *board.Board,
 		return set[ch.Stones[0]]
 	}
 
+	// Benson auf der Stellung VOR dem Zug: erst der Übergang macht aus dem
+	// Status ein Ereignis, das die Prosa erwähnen darf.
+	bensonBeforeB := groups.UnconditionallyAlive(bb, board.Black)
+	bensonBeforeW := groups.UnconditionallyAlive(bb, board.White)
+	aliveBefore := func(color board.Color, stones []board.Point) bool {
+		set := bensonBeforeB
+
+		if color == board.White {
+			set = bensonBeforeW
+		}
+
+		for _, s := range stones {
+			if set[s] {
+				return true
+			}
+		}
+
+		return false
+	}
+
 	seen := map[board.Point]bool{}
 
 	addChain := func(ch *groups.Chain) {
@@ -452,6 +499,7 @@ func collectEffects(mv board.Move, size int, bb, ab *board.Board,
 		} else {
 			eff.StrengthBefore = strength.Group(size, ownBefore,
 				existed, ch.Color, tau)
+			eff.UncondAliveBefore = aliveBefore(ch.Color, existed)
 		}
 
 		out = append(out, eff)
@@ -488,131 +536,6 @@ func collectEffects(mv board.Move, size int, bb, ab *board.Board,
 	}
 
 	return out
-}
-
-func renderText(r *MoveReport, matchesBest bool) string {
-	var sb strings.Builder
-
-	fmt.Fprintf(&sb, "Zug %d — %s %s [%s, %+.1f Pkt]. ",
-		r.Number, r.Player, r.Coord, r.Category, -r.PointsLost)
-	fmt.Fprintf(&sb, "Gewinnchance %s: %.1f %% → %.1f %%.",
-		r.Player, 100*r.WinrateBefore, 100*r.WinrateAfter)
-
-	if r.BestMove != "" && !matchesBest {
-		fmt.Fprintf(&sb, "\nEngine-Erstwahl: %s", r.BestMove)
-
-		if len(r.BestPV) > 1 {
-			fmt.Fprintf(&sb, " (Variante: %s)", strings.Join(r.BestPV, " "))
-		}
-
-		sb.WriteString(".")
-	}
-
-	for _, e := range r.Effects {
-		sb.WriteString("\n")
-
-		switch {
-		case e.Captured:
-			fmt.Fprintf(&sb,
-				"Geschlagen: %se Kette um %s (%d Stein(e), Stärke vorher %.2f).",
-				e.Color, e.Rep, e.Stones, e.StrengthBefore)
-
-		default:
-			fmt.Fprintf(&sb,
-				"%se Kette um %s (%d Stein(e), %d Freiheit(en)): Stärke %.2f → %.2f",
-				e.Color, e.Rep, e.Stones, e.Liberties,
-				e.StrengthBefore, e.StrengthAfter)
-
-			if e.InAtari {
-				sb.WriteString(" — steht im Atari!")
-			} else if e.UncondAlive {
-				sb.WriteString(" — unbedingt lebendig (Benson).")
-			} else {
-				sb.WriteString(".")
-			}
-		}
-	}
-
-	fmt.Fprintf(&sb, "\nMerksatz: %s", lesson(r, matchesBest))
-
-	return sb.String()
-}
-
-// lesson wählt einen didaktischen Merksatz — ausschließlich auf Basis
-// berechneter Fakten, nie spekulativ.
-func lesson(r *MoveReport, matchesBest bool) string {
-	if r.Pass {
-		return "Passen Sie nur, wenn kein Zug mehr Punkte bringt — " +
-			"prüfen Sie offene Randgebiete und Ko-Drohungen."
-	}
-
-	var ownAtari, oppAtari, captured bool
-	var weakenedOwn *GroupEffect
-
-	for i := range r.Effects {
-		e := &r.Effects[i]
-
-		if e.Captured {
-			captured = true
-		}
-
-		if e.InAtari {
-			if e.Color == r.Player {
-				ownAtari = true
-			} else {
-				oppAtari = true
-			}
-		}
-
-		if e.Color == r.Player && !e.New &&
-			e.StrengthBefore-e.StrengthAfter >= 0.15 {
-			weakenedOwn = e
-		}
-	}
-
-	switch {
-	case ownAtari:
-		return "Ihre Kette steht nach diesem Zug im Atari — zählen Sie " +
-			"die Freiheiten VOR dem Setzen, nicht danach."
-
-	case captured:
-		return "Geschlagene Steine sichern Freiheiten und Augenraum — " +
-			"prüfen Sie, ob der Gewinn den Tempoverlust wert war."
-
-	case oppAtari:
-		return "Atari allein tötet nicht — lesen Sie Leiter und " +
-			"Verbindung bis zum Ende, bevor Sie jagen."
-
-	case weakenedOwn != nil:
-		return fmt.Sprintf("Der Zug schwächt Ihre Kette um %s (Δ %.2f) — "+
-			"Stabilität der eigenen Gruppen geht vor Territorium.",
-			weakenedOwn.Rep, weakenedOwn.StrengthAfter-weakenedOwn.StrengthBefore)
-
-	case matchesBest:
-		return "Deckungsgleich mit der Engine-Erstwahl — merken Sie sich " +
-			"die Form dieser Stellung."
-
-	case r.PointsLost > 6:
-		// Ohne MoveInfos liefert Result.Best() nil und BestMove bleibt leer;
-		// dann keinen Zug nennen statt einen halben Satz zu erzeugen.
-		if r.BestMove == "" {
-			return "Große Verluste entstehen meist, weil der größte Punkt " +
-				"übersehen wird — suchen Sie vor dem Zug die dringendste " +
-				"Gruppe und die größte offene Stelle."
-		}
-
-		return fmt.Sprintf("Große Verluste entstehen meist, weil der größte "+
-			"Punkt übersehen wird — vergleichen Sie Ihren Zug mit %s.",
-			r.BestMove)
-
-	case r.PointsLost > 1.5:
-		return "Fragen Sie vor jedem Zug: Was ist die dringendste Gruppe, " +
-			"was der größte Punkt? Dringend schlägt groß."
-
-	default:
-		return "Solide. Beobachten Sie, wie sich die Ownership in der " +
-			"Umgebung des Zuges verschiebt."
-	}
 }
 
 func category(pointsLost float64, matchesBest bool) string {

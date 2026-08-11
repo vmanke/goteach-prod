@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vmanke/goteach-prod/internal/auth"
+	"github.com/vmanke/goteach-prod/shapes"
 	"github.com/vmanke/goteach-prod/teaching"
 )
 
@@ -913,13 +915,16 @@ func TestAnalyzeLinesFormat(t *testing.T) {
 
 	records := strings.Split(rr.Body.String(), linesRecordSep)
 
-	// Ein Kopfsatz plus ein Satz je Zug.
-	if len(records) != 11 {
-		t.Fatalf("Datensätze = %d, erwartet 11", len(records))
+	// Kopfsatz, Versionssatz, ein Satz je Zug (keine Vorgabesteine, der
+	// Mock findet auf der Demo-Partie keine Stränge).
+	if len(records) != 12 {
+		t.Fatalf("Datensätze = %d, erwartet 12", len(records))
 	}
 
 	head := strings.Split(records[0], linesFieldSep)
 
+	// Der Kopfsatz bleibt Satz 0 mit exakt 6 Feldern — Bestandsclients
+	// destrukturieren ihn hart.
 	if len(head) != 6 {
 		t.Fatalf("Kopfsatz hat %d Felder, erwartet 6: %q", len(head), records[0])
 	}
@@ -928,16 +933,128 @@ func TestAnalyzeLinesFormat(t *testing.T) {
 		t.Errorf("Kopfsatz unerwartet: %q", records[0])
 	}
 
-	first := strings.Split(records[1], linesFieldSep)
+	if records[1] != "V"+linesFieldSep+"2" {
+		t.Errorf("Versionssatz unerwartet: %q", records[1])
+	}
 
+	first := strings.Split(records[2], linesFieldSep)
+
+	// Auch der Zugsatz bleibt bei exakt 10 Feldern.
 	if len(first) != 10 || first[0] != "M" || first[1] != "1" || first[2] != "Schwarz" {
-		t.Errorf("erster Zugsatz unerwartet: %q", records[1])
+		t.Errorf("erster Zugsatz unerwartet: %q", records[2])
 	}
 
 	// Der Lehrtext ist das letzte Feld und darf keine Steuerzeichen mehr
 	// tragen, sonst zerfällt der Datensatz beim Splitten.
 	if text := first[9]; text == "" || strings.ContainsAny(text, "\n\x1e\x1f") {
 		t.Errorf("Lehrtext leer oder mit Steuerzeichen: %q", text)
+	}
+}
+
+// Handicap-Partie: P-Sätze stehen zwischen V und dem ersten M, ein Satz
+// je Vorgabestein, in SGF-Reihenfolge.
+func TestAnalyzeLinesFormatSetupStones(t *testing.T) {
+	sgf := "(;GM[1]FF[4]SZ[9]KM[0.5]AB[cc][gg];W[ee];B[cf])"
+	req := httptest.NewRequest(http.MethodPost, "/analyze?format=lines",
+		strings.NewReader(sgf))
+
+	rr := serve(t, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, Body: %s", rr.Code, rr.Body.String())
+	}
+
+	records := strings.Split(rr.Body.String(), linesRecordSep)
+
+	// H, V, 2×P, 2×M.
+	if len(records) != 6 {
+		t.Fatalf("Datensätze = %d, erwartet 6: %q", len(records), records)
+	}
+
+	wantP := [][2]string{{"Schwarz", "C7"}, {"Schwarz", "G3"}}
+
+	for i, want := range wantP {
+		fields := strings.Split(records[2+i], linesFieldSep)
+
+		if len(fields) != 3 || fields[0] != "P" ||
+			fields[1] != want[0] || fields[2] != want[1] {
+			t.Errorf("P-Satz %d unerwartet: %q", i, records[2+i])
+		}
+	}
+
+	if fields := strings.Split(records[4], linesFieldSep); fields[0] != "M" {
+		t.Errorf("nach den P-Sätzen kein Zugsatz: %q", records[4])
+	}
+}
+
+// Der S-Satz eines Erzählstrangs: 16 Felder, Zahlenfelder parsen, die
+// Zugliste bleibt im Zugbereich der Partie.
+func TestLinesBodyStrandRecord(t *testing.T) {
+	resp := analyzeResponse{
+		Size:  19,
+		Komi:  6.5,
+		Moves: 40,
+		Strands: []teaching.Strand{{
+			ID:       1,
+			Area:     "obere Seite",
+			FromMove: 12,
+			ToMove:   31,
+			Moves:    []int{12, 13, 17, 31},
+			Shapes: []shapes.Instance{
+				{Name: "leeres Dreieck"},
+				{Name: "Leiter"},
+				{Name: "leeres Dreieck"},
+			},
+			PointsLost: map[string]float64{"Schwarz": 4.2, "Weiß": 1.5},
+			Captures:   3,
+			Worst: &teaching.MoveRef{
+				Number: 17, Player: "Schwarz", Coord: "Q14",
+				PointsLost: 3.1, Category: "Fehler",
+			},
+			Text: "Der Kampf um die obere Seite\nkostete Schwarz am meisten.",
+		}},
+	}
+
+	records := strings.Split(linesBody(resp), linesRecordSep)
+	last := records[len(records)-1]
+	fields := strings.Split(last, linesFieldSep)
+
+	if len(fields) != 16 || fields[0] != "S" {
+		t.Fatalf("S-Satz hat %d Felder, erwartet 16: %q", len(fields), last)
+	}
+
+	for _, idx := range []int{1, 3, 4, 5, 9} {
+		if _, err := strconv.Atoi(fields[idx]); err != nil {
+			t.Errorf("Feld %d ist keine Ganzzahl: %q", idx, fields[idx])
+		}
+	}
+
+	for _, idx := range []int{7, 8, 13} {
+		if _, err := strconv.ParseFloat(fields[idx], 64); err != nil {
+			t.Errorf("Feld %d ist keine Zahl: %q", idx, fields[idx])
+		}
+	}
+
+	for _, number := range strings.Split(fields[6], ",") {
+		n, err := strconv.Atoi(number)
+
+		if err != nil || n < 1 || n > resp.Moves {
+			t.Errorf("Zugliste außerhalb der Partie: %q", fields[6])
+		}
+	}
+
+	if fields[5] != "4" || fields[10] != "17" || fields[11] != "Q14" ||
+		fields[12] != "Fehler" {
+		t.Errorf("S-Satz-Felder unerwartet: %q", last)
+	}
+
+	// Formnamen dedupliziert, Text ohne Steuerzeichen.
+	if fields[14] != "leeres Dreieck,Leiter" {
+		t.Errorf("Formen = %q, erwartet dedupliziert", fields[14])
+	}
+
+	if strings.ContainsAny(fields[15], "\n\x1e\x1f") {
+		t.Errorf("Strang-Text mit Steuerzeichen: %q", fields[15])
 	}
 }
 
