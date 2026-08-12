@@ -35,11 +35,15 @@ primary_region = 'fra'
   auto_start_machines = true
   min_machines_running = 0
 
+  # Nebenläufigkeit und Check stehen als Abschnitt, nicht als Inline-
+  # Tabelle: das Fly-Dashboard schreibt diese Datei bei einer Änderung im
+  # UI zurück, und zwar in Abschnittsform. Blieb daneben die Inline-Fassung
+  # desselben Schlüssels stehen, war er doppelt belegt und flyctl lud die
+  # Datei gar nicht mehr ("key concurrency should be a table, not a
+  # value") — jeder Deploy scheiterte dann nach elf Sekunden.
+
   # KataGo sättigt alle Kerne; eine zweite Analyse gleichzeitig macht beide
   # langsamer. Eine kleine Warteschlange statt Parallelität.
-  checks = [{ grace_period = '30s', interval = '30s', method = 'GET', path = '/healthz', timeout = '5s' }]
-  concurrency = { hard_limit = 2, soft_limit = 1, type = 'requests' }
-
   [http_service.concurrency]
     type = "requests"
     hard_limit = 2
