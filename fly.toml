@@ -1,47 +1,10 @@
-# fly.toml app configuration file generated for goteach-prod on 2026-08-10T22:17:57Z
+# fly.toml app configuration file generated for goteach-prod on 2026-08-12T13:00:07Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# Fly.io-Deployment des goteach-Servers MIT echter KataGo-Engine.
-#
-# Warum Fly und nicht Vercel: der Dienst braucht das KataGo-Binary und das
-# neuronale Netz auf der Maschine und rechnet pro Anfrage Minuten auf der
-# CPU — beides kann eine Serverless-Funktion nicht. Das Dockerfile dieses
-# Repos baut genau dieses Image; diese Datei sagt Fly nur, wie es laufen
-# soll.
-#
-#   fly launch --no-deploy   # einmalig; übernimmt diese Datei
-#   fly deploy
-#
-# Danach zeigt die Vereinsseite mit content::ANALYZE_URL auf
-# https://<app>.fly.dev/analyze (plus dieselbe Origin in der CSP).
-#
-# Betriebsnotizen:
-# * KataGo startet pro /analyze-Anfrage als Kindprozess und lädt das Netz
-#   neu — auf 4 Kernen kostet schon eine kurze Partie ~2 Minuten. Die
-#   Maschinengröße unten (4 Performance-Kerne) ist dafür das sinnvolle
-#   Minimum; kleiner wird es zäh, größer wird es besser.
-# * Der Fly-Proxy trennt Verbindungen, auf denen länger nichts ankommt.
-#   /analyze hält sie deshalb mit Heartbeat-Füllbytes offen (siehe
-#   keepAliveInterval in internal/server). Lange Partien dauern trotzdem
-#   lange — moderate visits oder Zugbereiche (from/to) bleiben sinnvoll.
-# * auto_stop/auto_start: die Maschine schläft ohne Verkehr und kostet
-#   dann nichts; die erste Anfrage weckt sie (ein paar Sekunden Kaltstart,
-#   zusätzlich zur Analysezeit).
-# * Aufträge liegen im Speicher dieser Maschine (siehe internal/server,
-#   Auftragsbetrieb). Hält sie an, sind laufende Aufträge verloren und
-#   müssen neu gestellt werden. Das Polling des Clients hält sie wach —
-#   wer den Tab schließt, riskiert seinen Auftrag. Wem das zu wackelig
-#   ist, setzt min_machines_running = 1 (kostet dann durchgehend).
-# * Läuft je mehr als eine Maschine, muss die Statusabfrage zu der
-#   Maschine zurück, die rechnet. Dafür trägt die Auftrags-ID die
-#   FLY_MACHINE_ID, und die Abfrage antwortet nötigenfalls mit dem
-#   fly-replay-Header.
-# * CORS: die Vereinsseite ist per Default freigegeben (internal/server);
-#   weitere Absender über GOTEACH_CORS_ORIGINS im [env]-Block.
 
 app = "goteach-prod"
-primary_region = "fra"
+primary_region = 'fra'
 
 [build]
   dockerfile = "Dockerfile"
@@ -68,12 +31,15 @@ primary_region = "fra"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 0
 
   # KataGo sättigt alle Kerne; eine zweite Analyse gleichzeitig macht beide
   # langsamer. Eine kleine Warteschlange statt Parallelität.
+  checks = [{ grace_period = '30s', interval = '30s', method = 'GET', path = '/healthz', timeout = '5s' }]
+  concurrency = { hard_limit = 2, soft_limit = 1, type = 'requests' }
+
   [http_service.concurrency]
     type = "requests"
     hard_limit = 2
@@ -82,6 +48,7 @@ primary_region = "fra"
   # grace_period großzügig: flyctl wartet beim Deploy auf genau diesen
   # Check, und eine schlafend aktualisierte Maschine braucht einen Moment
   # — ein knapper Wert lässt Deploys rot aussehen, die in Ordnung sind.
+
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
@@ -90,4 +57,7 @@ primary_region = "fra"
     path = "/healthz"
 
 [[vm]]
-  size = "performance-4x"
+  size = 'performance-4x'
+
+[deploy]
+  strategy = 'bluegreen'
