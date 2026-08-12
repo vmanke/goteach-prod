@@ -1,5 +1,11 @@
 # goteach — Go-Analyse mit Teaching pro Zug
 
+> Per-move Go teachings from an SGF file: KataGo analysis, group strength
+> and shape reading, with no claim that a number does not back.
+
+Der Rest dieses README ist deutsch: er ist die Referenz und wird nicht
+übersetzt.
+
 Umsetzung der Go-Analysearchitektur: symbolischer Brettzustand →
 Gruppensegmentierung → KataGo-Ownership → situatives Stärkemaß. Eingabe ist
 immer eine SGF-Partie; es gibt keinen Bildpfad, weil Go-Partien als SGF
