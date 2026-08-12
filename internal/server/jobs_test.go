@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -364,5 +366,49 @@ func TestRetentionTrimsOldestFinished(t *testing.T) {
 
 	if _, ok := store.jobs[last]; !ok {
 		t.Errorf("jüngster Auftrag %q fehlt", last)
+	}
+}
+
+// Ein nicht geleerter Body kostet die Verbindung: net/http legt sie nur
+// zurück in den Pool, wenn sie zu Ende gelesen wurde. Der 404-Zweig in
+// submitJob liest den Body nicht — ohne Leerlesen baut jeder Versuch eine
+// neue TCP-Verbindung auf.
+func TestSubmitJobReusesConnection(t *testing.T) {
+	var mu sync.Mutex
+
+	conns := map[net.Conn]bool{}
+
+	stub := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			// Fehlerantwort mit Inhalt: nur so ist überhaupt etwas übrig,
+			// das liegen bleiben könnte.
+			http.Error(w, "404 page not found", http.StatusNotFound)
+		}))
+
+	stub.Config.ConnState = func(c net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			mu.Lock()
+			conns[c] = true
+			mu.Unlock()
+		}
+	}
+
+	defer stub.Close()
+
+	t.Setenv("KATAGO_REMOTE_URL", stub.URL)
+	t.Setenv("KATAGO_REMOTE_TOKEN", "tok")
+
+	for i := 0; i < 3; i++ {
+		if _, err := submitJob(demoSGF, nil); err == nil {
+			t.Fatal("404 muss einen Fehler liefern")
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(conns) != 1 {
+		t.Errorf("%d TCP-Verbindungen für 3 Anfragen — Body bleibt liegen",
+			len(conns))
 	}
 }

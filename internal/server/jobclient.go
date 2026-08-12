@@ -64,6 +64,19 @@ func engineRequest(method, path string, body io.Reader) (*http.Request, error) {
 	return req, nil
 }
 
+// maxDrainBytes deckelt das Leerlesen: Wer mehr schickt, verliert die
+// Wiederverwendung — das ist billiger, als beliebig viel zu lesen.
+const maxDrainBytes = 1 << 20
+
+// closeBody gibt die Verbindung in den Pool zurück. net/http kann sie nur
+// wiederverwenden, wenn der Body bis zum Ende gelesen wurde; die Aufrufer
+// hier lesen ihn aber nur begrenzt (LimitReader) oder — im Fall eines
+// erkannten Fehlerstatus — gar nicht.
+func closeBody(resp *http.Response) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBytes))
+	_ = resp.Body.Close()
+}
+
 // engineErrorText liest die Fehlermeldung einer Nicht-200-Antwort.
 func engineErrorText(resp *http.Response) string {
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
@@ -100,7 +113,7 @@ func submitJob(sgf string, params map[string]string) (string, error) {
 		return "", err
 	}
 
-	defer resp.Body.Close()
+	defer closeBody(resp)
 
 	// 404 heißt hier nicht "nichts gefunden", sondern: Der Engine-Host
 	// kennt die Route nicht. Ohne diesen Hinweis liest der Betreiber bloß
@@ -146,7 +159,7 @@ func fetchJob(id string) (jobStatusReply, int, error) {
 		return jobStatusReply{}, http.StatusBadGateway, err
 	}
 
-	defer resp.Body.Close()
+	defer closeBody(resp)
 
 	if resp.StatusCode == http.StatusNotFound {
 		return jobStatusReply{}, http.StatusNotFound,
