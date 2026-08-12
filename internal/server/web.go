@@ -34,7 +34,8 @@ type homeData struct {
 }
 
 // baseURL rekonstruiert die absolute Basis-URL aus dem Request; hinter
-// Vercels Proxy steckt das Schema in X-Forwarded-Proto.
+// einem TLS-terminierenden Proxy (Fly und jeder andere) steckt das Schema
+// in X-Forwarded-Proto.
 func baseURL(r *http.Request) string {
 	proto := r.Header.Get("X-Forwarded-Proto")
 

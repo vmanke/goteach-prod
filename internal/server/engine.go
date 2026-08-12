@@ -1,7 +1,7 @@
 // Engine-Passthrough: POST /engine/analyze reicht eine katago.Request
 // samt Turns an die LOKALE Engine dieser Instanz durch (oder den Mock).
-// Damit kann eine Instanz ohne Engine-Binary — etwa auf Vercel — die
-// Analyse an den Docker-Host delegieren (katago.Remote als Client).
+// Damit kann eine Instanz ohne Engine-Binary die Analyse an den
+// Docker-Host delegieren (katago.Remote als Client).
 //
 // Geschützt per Shared-Secret KATAGO_ENGINE_TOKEN (Bearer, Vergleich in
 // konstanter Zeit) — bewusst NICHT per User-JWT: der Aufrufer ist ein

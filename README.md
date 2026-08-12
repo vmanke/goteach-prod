@@ -126,9 +126,9 @@ Rechnet die Instanz **selbst** (lokale Engine oder Mock), antwortet
 
 Liegt die Engine auf einem **anderen Host** (`KATAGO_REMOTE_URL`), wird nicht
 mehr synchron gerechnet. Der Grund ist hart: Eine vollständige Partie kostet
-Minuten, und die aufrufende Instanz läuft typischerweise unter einem
-Serverless-Limit — auf Vercel 300 Sekunden. Das war nicht zu gewinnen, die
-Funktion wurde mitten in der Analyse abgeschnitten.
+Minuten, und die aufrufende Instanz steht typischerweise unter einem
+harten Anfrage-Zeitlimit ihrer Umgebung. Das war nicht zu gewinnen: Die
+Anfrage wurde mitten in der Analyse abgeschnitten.
 
 Stattdessen:
 
@@ -243,11 +243,11 @@ zustandslos); die PBKDF2-Kosten bremsen Brute-Force serverseitig.
 Hinweis: Das No-JS-Formular funktioniert bei aktiver Auth nicht — der
 Multipart-POST kann keinen Bearer-Header setzen und erhält 401.
 
-### Remote-Engine: echte Analysen auf Vercel
+### Remote-Engine: Analyse auf einem zweiten Host
 
-Vercel kann kein KataGo-Binary ausführen (Größen-/Zeitlimits, keine
-GPU) — dort lief bisher nur der Mock. Die Lösung ist Arbeitsteilung
-über zwei Instanzen desselben Servers:
+Nicht jede Umgebung kann ein KataGo-Binary ausführen (Größen- und
+Zeitlimits, keine GPU) — dort läuft nur der Mock. Die Lösung ist
+Arbeitsteilung über zwei Instanzen desselben Servers:
 
 1. **Engine-Host** (Docker-Image auf VPS, Fly.io, Railway …): hat die
    echte Engine und schaltet mit `KATAGO_ENGINE_TOKEN` den Passthrough
@@ -257,7 +257,7 @@ GPU) — dort lief bisher nur der Mock. Die Lösung ist Arbeitsteilung
    und nutzt ausschließlich die lokale Engine — nie selbst eine
    Remote-Engine, damit sich zwei Instanzen nicht endlos gegenseitig
    weiterreichen.
-2. **Vercel-Instanz**: `KATAGO_REMOTE_URL` (Basis-URL des Hosts) und
+2. **Instanz ohne Engine**: `KATAGO_REMOTE_URL` (Basis-URL des Hosts) und
    `KATAGO_REMOTE_TOKEN` (gleicher Wert wie `KATAGO_ENGINE_TOKEN`)
    setzen — weiterhin **keine** `KATAGO_PATH`/`KATAGO_MODEL`. Jede
    Analyse läuft dann über den Host; `"synthetic"` in der Antwort
@@ -268,16 +268,17 @@ GPU) — dort lief bisher nur der Mock. Die Lösung ist Arbeitsteilung
 Wire-Format des Passthrough (JSON): Request
 `{"request":{"initialStones":…,"moves":…,"rules":…,"komi":…,"size":…,"maxVisits":…},"turns":[…]}`,
 Antwort `{"synthetic":…,"results":[…]}` mit den rohen
-KataGo-Ergebnissen pro Turn. Der Remote-Client (`katago.Remote`) hat
-5 Minuten Timeout pro Analyse; auf Vercel begrenzt zusätzlich das
-Funktions-Zeitlimit die Antwortzeit — `visits` dort moderat wählen
-(Analysen skalieren mit Visits × Stellungen).
+KataGo-Ergebnissen pro Turn. Der Remote-Client (`katago.Remote`) deckelt
+einen Analyse-Roundtrip auf `KATAGO_REMOTE_TIMEOUT` (Default `2m`); der
+Wert muss **unter** dem Limit der aufrufenden Umgebung bleiben, damit ein
+Fehler als lesbarer 502 ankommt statt als roher Plattform-Timeout. Steht
+die aufrufende Instanz zusätzlich unter einem eigenen Zeitlimit, begrenzt
+das die Antwortzeit weiter — `visits` dann moderat wählen (Analysen
+skalieren mit Visits × Stellungen).
 
 ### Docker: echte KataGo-Engine
 
-Vercel-Functions haben keine GPU und taugen nicht als Engine-Host — dort
-läuft der Mock. Für echte Analysen bündelt das `Dockerfile` alles in
-einen Container: Go-Server, KataGo (CPU/Eigen, AVX2) und ein starkes,
+Für echte Analysen bündelt das `Dockerfile` alles in einen Container: Go-Server, KataGo (CPU/Eigen, AVX2) und ein starkes,
 kleines Transformer-Netz (`b10c384h6nbttflrs`, 36 MB) aus dem offiziellen
 KataGo-Release v1.17.1. Beide Downloads werden im Build gegen gepinnte
 SHA256-Summen verifiziert (bei anderen `KATAGO_*`-Build-Args die
@@ -316,8 +317,9 @@ Hinweise:
   Release-Binaries sind x64; auf ARM (z. B. Apple Silicon) KataGo selbst
   kompilieren oder auf einem x64-Host deployen.
 - **Arbeitsteilung:** der Docker-Host (VPS, Fly.io, Railway …) liefert
-  die echte Analyse; Vercel nutzt ihn per `KATAGO_REMOTE_URL` als
-  Remote-Engine (siehe „Remote-Engine“) oder bleibt ohne sie Demo (Mock).
+  die echte Analyse; eine Instanz ohne Engine nutzt ihn per
+  `KATAGO_REMOTE_URL` als Remote-Engine (siehe „Remote-Engine“) oder
+  bleibt ohne sie Demo (Mock).
 
 ### Fly.io-Deployment (echte Engine)
 
@@ -346,36 +348,6 @@ ein Deploy-Token erzeugen und es im GitHub-Repo unter Settings → Secrets
 and variables → Actions als **`FLY_API_TOKEN`** hinterlegen. Ohne das
 Secret schlägt der Workflow mit einer Auth-Meldung fehl und richtet nichts
 an.
-
-### Vercel-Deployment
-
-Vercels Go-Support baut den Server nur im **Standalone-Modus**, wenn das
-Framework-Preset `go` ist; andernfalls greift der alte
-Serverless-Function-Builder, baut das falsche Ziel und jede Anfrage endet
-mit `FUNCTION_INVOCATION_FAILED`. Die `vercel.json` im Repo pinnt deshalb
-beides — das überstimmt die Projekteinstellungen bei jedem Deployment:
-
-- `"framework": "go"` erzwingt den Standalone-Modus;
-- `"buildCommand": "go build -o \"$VERCEL_OUTPUT_FILE\" ."` baut garantiert
-  den Server aus der Repo-Wurzel. Wichtig, weil auch der Standalone-Modus
-  einen Build-Command-Override aus den Projekteinstellungen ehrt — steht
-  dort z. B. die CLI-Buildzeile aus diesem README, deployt Vercel die CLI,
-  die sofort mit der Flag-Usage endet (genau dieses Fehlerbild gab es).
-
-Im Vercel-Dashboard sollten Install-/Build-Command-Overrides trotzdem
-**aus** sein und niemals `KATAGO_PATH`/`KATAGO_MODEL` gesetzt werden
-(Functions haben keine Engine-Binary). Für echte Analysen stattdessen
-`KATAGO_REMOTE_URL` und `KATAGO_REMOTE_TOKEN` auf den Engine-Host
-zeigen lassen (siehe „Remote-Engine“); ohne beides antwortet der Mock.
-Mit gesetztem `KATAGO_REMOTE_URL` läuft `/analyze` im Auftragsbetrieb und
-antwortet sofort — das Serverless-Limit wird damit nicht mehr berührt.
-`KATAGO_REMOTE_TIMEOUT` (Default `2m`) deckelt die Aufrufe zum Engine-Host
-und muss **unter** dem Limit der Umgebung bleiben, damit ein Fehler als
-lesbarer 502 ankommt statt als roher Plattform-Timeout.
-Für den JWT-Schutz `AUTH_USERS` und `AUTH_JWT_SECRET` als
-Environment-Variablen eintragen. Der Server lauscht auf dem `PORT` aus
-der Umgebung; das Root Directory des Projekts muss auf die Repo-Wurzel
-zeigen.
 
 ## LLM-Feinschliff (optional)
 

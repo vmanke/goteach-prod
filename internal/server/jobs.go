@@ -3,9 +3,9 @@
 // zurück; GET /engine/jobs?id=… liefert Status und am Ende den Report.
 //
 // Warum überhaupt: Eine vollständige Partie kostet Minuten. Die aufrufende
-// Instanz läuft auf Vercel und wird dort nach 300 Sekunden hart beendet —
-// synchron ist das nicht zu gewinnen. Der Auftrag liegt deshalb hier, wo
-// kein solches Limit gilt.
+// Instanz kann in einer Umgebung mit hartem Anfrage-Zeitlimit stehen und
+// wird dann mitten in der Analyse beendet — synchron ist das nicht zu
+// gewinnen. Der Auftrag liegt deshalb hier, wo kein solches Limit gilt.
 //
 // Warum auf Teaching- statt auf Engine-Ebene: teaching.AnalyzeGame ruft den
 // Analyzer je nach RefineVisits mehrfach auf. Läge der Auftrag eine Ebene
