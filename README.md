@@ -268,14 +268,13 @@ Arbeitsteilung über zwei Instanzen desselben Servers:
 Wire-Format des Passthrough (JSON): Request
 `{"request":{"initialStones":…,"moves":…,"rules":…,"komi":…,"size":…,"maxVisits":…},"turns":[…]}`,
 Antwort `{"synthetic":…,"results":[…]}` mit den rohen
-KataGo-Ergebnissen pro Turn. Der Remote-Client (`katago.Remote`) hat
-5 Minuten Timeout pro Analyse; steht die aufrufende Instanz unter einem
-eigenen Zeitlimit, begrenzt das zusätzlich die Antwortzeit — `visits` dann
-moderat wählen (Analysen skalieren mit Visits × Stellungen).
-
-`KATAGO_REMOTE_TIMEOUT` (Default `2m`) deckelt die Aufrufe zum Engine-Host
-und muss **unter** dem Limit der aufrufenden Umgebung bleiben, damit ein
-Fehler als lesbarer 502 ankommt statt als roher Plattform-Timeout.
+KataGo-Ergebnissen pro Turn. Der Remote-Client (`katago.Remote`) deckelt
+einen Analyse-Roundtrip auf `KATAGO_REMOTE_TIMEOUT` (Default `2m`); der
+Wert muss **unter** dem Limit der aufrufenden Umgebung bleiben, damit ein
+Fehler als lesbarer 502 ankommt statt als roher Plattform-Timeout. Steht
+die aufrufende Instanz zusätzlich unter einem eigenen Zeitlimit, begrenzt
+das die Antwortzeit weiter — `visits` dann moderat wählen (Analysen
+skalieren mit Visits × Stellungen).
 
 ### Docker: echte KataGo-Engine
 
