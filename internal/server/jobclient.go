@@ -102,6 +102,16 @@ func submitJob(sgf string, params map[string]string) (string, error) {
 
 	defer resp.Body.Close()
 
+	// 404 heißt hier nicht "nichts gefunden", sondern: Der Engine-Host
+	// kennt die Route nicht. Ohne diesen Hinweis liest der Betreiber bloß
+	// "HTTP 404" und sucht am falschen Ende.
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf(
+			"Engine-Host kennt den Auftragsbetrieb nicht (%s/engine/jobs): "+
+				"entweder läuft dort ein älterer Stand — dann neu deployen — "+
+				"oder KATAGO_ENGINE_TOKEN fehlt", engineBase())
+	}
+
 	if resp.StatusCode != http.StatusAccepted {
 		return "", fmt.Errorf("%s", engineErrorText(resp))
 	}

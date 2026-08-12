@@ -151,6 +151,53 @@ func TestAPIInfo(t *testing.T) {
 	}
 }
 
+// /api ist die Betriebsdiagnose: Woran erkennt man sonst, welchen Stand
+// und welchen Modus ein Deployment fährt?
+func TestAPIInfoReportsMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		env            map[string]string
+		mode           string
+		wantEngineJobs bool
+	}{
+		{"synchron", nil, "synchron", false},
+		{"Engine-Host", map[string]string{
+			"KATAGO_ENGINE_TOKEN": "tok",
+		}, "synchron", true},
+		{"Auftragsbetrieb", map[string]string{
+			"KATAGO_REMOTE_URL":   "https://engine.example",
+			"KATAGO_REMOTE_TOKEN": "tok",
+		}, "auftrag", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api", nil)
+
+			rr := serveEnv(t, req, tc.env)
+
+			var info map[string]any
+
+			if err := json.Unmarshal(rr.Body.Bytes(), &info); err != nil {
+				t.Fatalf("keine JSON-Antwort: %v", err)
+			}
+
+			if info["jobs"] != true {
+				t.Error("jobs fehlt — Stand mit Auftragsbetrieb muss das melden")
+			}
+
+			if info["mode"] != tc.mode {
+				t.Errorf("mode = %v, erwartet %q", info["mode"], tc.mode)
+			}
+
+			if info["engineJobs"] != tc.wantEngineJobs {
+				t.Errorf("engineJobs = %v, erwartet %v",
+					info["engineJobs"], tc.wantEngineJobs)
+			}
+		})
+	}
+}
+
 func decodeAnalyze(t *testing.T, rr *httptest.ResponseRecorder) analyzeResponse {
 	t.Helper()
 

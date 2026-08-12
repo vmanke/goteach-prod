@@ -206,6 +206,40 @@ func TestAnalyzeStatusMissingID(t *testing.T) {
 	}
 }
 
+// Kennt der Engine-Host die Auftragsroute nicht (älterer Stand oder
+// fehlendes KATAGO_ENGINE_TOKEN), muss die Meldung das benennen — ein
+// blankes "HTTP 404" schickt den Betreiber auf die falsche Fährte.
+func TestSubmitJobReportsVersionSkew(t *testing.T) {
+	// Ein Host von vor dem Auftragsbetrieb: die Route gibt es dort nicht.
+	stub := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		}))
+	defer stub.Close()
+
+	env := map[string]string{
+		"KATAGO_REMOTE_URL":   stub.URL,
+		"KATAGO_REMOTE_TOKEN": "tok",
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF))
+
+	rr := serveEnv(t, req, env)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("Status = %d, erwartet 502", rr.Code)
+	}
+
+	body := rr.Body.String()
+
+	for _, want := range []string{"Auftragsbetrieb", "deployen", "KATAGO_ENGINE_TOKEN"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Meldung ohne %q: %s", want, body)
+		}
+	}
+}
+
 // Ohne JavaScript liefert die Statusroute eine Seite, die sich selbst
 // nachlädt, statt JSON.
 func TestAnalyzeStatusHTMLPage(t *testing.T) {
