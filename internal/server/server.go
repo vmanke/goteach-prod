@@ -1,6 +1,6 @@
 // Package server stellt die Teaching-Analyse als HTTP-Dienst bereit.
-// Die Vercel-kompatiblen Entrypoints (main.go in der Repo-Wurzel und
-// cmd/server/main.go) sind dünne Wrapper um Run.
+// Die Entrypoints (main.go in der Repo-Wurzel — den baut das Dockerfile —
+// und cmd/server/main.go) sind dünne Wrapper um Run.
 //
 // Endpunkte:
 //
@@ -200,7 +200,7 @@ func katagoConfigured() bool {
 }
 
 // katagoRemoteConfigured meldet, ob Analysen an einen entfernten
-// Engine-Host delegiert werden (z. B. Vercel → Docker-Host).
+// Engine-Host delegiert werden (Instanz ohne Engine → Docker-Host).
 func katagoRemoteConfigured() bool {
 	return os.Getenv("KATAGO_REMOTE_URL") != ""
 }
@@ -349,7 +349,7 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	// Liegt die Engine auf einem anderen Host, wird hier nicht gerechnet:
 	// Eine volle Partie kostet Minuten, und diese Instanz läuft unter einem
-	// Serverless-Limit (auf Vercel 300 s), das sie unweigerlich reißt. Der
+	// Zeitlimit ihrer Umgebung, das sie unweigerlich reißt. Der
 	// Auftrag wandert deshalb zum Engine-Host, der ihn ohne solches Limit
 	// abarbeitet; der Client holt das Ergebnis über /analyze/status ab.
 	//

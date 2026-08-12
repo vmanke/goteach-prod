@@ -19,7 +19,7 @@ var ErrRemote = errors.New("katago: Remote-Engine")
 // defaultRemoteTimeout deckelt einen Analyse-Roundtrip.
 //
 // Der Wert MUSS unter dem Limit der Laufzeitumgebung bleiben. Er stand
-// einmal auf 5 Minuten — exakt dem Serverless-Limit von Vercel. Damit
+// einmal auf 5 Minuten — exakt dem Zeitlimit der damaligen Umgebung. Damit
 // konnte der Client nie zuerst auslösen: Die Plattform beendete die
 // Funktion immer eine Haaresbreite früher, der Aufrufer sah einen rohen
 // Plattform-Timeout statt der vorgesehenen 502-Meldung „Remote-Engine: …".
@@ -53,8 +53,8 @@ const maxRemoteReplyBytes = 64 << 20
 
 // Remote ist ein Analyzer, der die Analyse an einen entfernten
 // goteach-Server mit echter Engine delegiert (POST <url>/engine/analyze,
-// Bearer-Token). So bekommt eine Instanz ohne KataGo-Binary — etwa auf
-// Vercel — echte Analysen vom Docker-Host.
+// Bearer-Token). So bekommt eine Instanz ohne KataGo-Binary echte
+// Analysen vom Docker-Host.
 type Remote struct {
 	baseURL   string
 	token     string

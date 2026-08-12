@@ -14,7 +14,7 @@ services:
     #   # JWT-Login (optional; Hashes: echo -n 'pw' | go run ./cmd/passhash):
     #   AUTH_USERS: "alice:pbkdf2-sha256$$600000$$…$$…"   # $$ = $ in Compose
     #   AUTH_JWT_SECRET: "langes-zufaelliges-secret"
-    #   # Engine-Passthrough für eine Instanz ohne Engine (z. B. Vercel):
+    #   # Engine-Passthrough für eine Instanz ohne eigene Engine:
     #   KATAGO_ENGINE_TOKEN: "gemeinsames-secret"
     ports:
       - "8080:8080"

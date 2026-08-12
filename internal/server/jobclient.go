@@ -1,7 +1,7 @@
-// Client-Seite des Auftragsbetriebs: Diese Instanz (typischerweise auf
-// Vercel, ohne KataGo-Binary) reicht die Partie an den Engine-Host weiter
-// und fragt später das Ergebnis ab. Beides sind kurze Aufrufe — die lange
-// Rechnung bleibt drüben.
+// Client-Seite des Auftragsbetriebs: Diese Instanz (eine ohne
+// KataGo-Binary) reicht die Partie an den Engine-Host weiter und fragt
+// später das Ergebnis ab. Beides sind kurze Aufrufe — die lange Rechnung
+// bleibt drüben.
 package server
 
 import (
