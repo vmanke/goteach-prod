@@ -148,6 +148,22 @@ Abholen von selbst (Abstand wächst von 2 auf 10 Sekunden); ohne JavaScript
 leitet der Formular-Post auf eine Statusseite um, die sich alle 5 Sekunden
 selbst nachlädt.
 
+### Erst den Stand prüfen, dann suchen
+
+Der Auftragsbetrieb setzt voraus, dass **beide** Instanzen ihn kennen. `GET /api`
+sagt in einem Blick, woran man ist:
+
+| Feld         | Bedeutung                                                        |
+|--------------|------------------------------------------------------------------|
+| `jobs`       | `true` — dieser Stand kennt den Auftragsbetrieb. Fehlt das Feld, läuft dort älterer Code und das Deployment ist überfällig. |
+| `mode`       | `auftrag`, wenn die Instanz an einen Engine-Host delegiert (`KATAGO_REMOTE_URL`); sonst `synchron`. |
+| `engineJobs` | `true` auf dem Engine-Host, sobald `KATAGO_ENGINE_TOKEN` gesetzt ist — also `/engine/jobs` erreichbar. |
+
+Erwartung im Normalbetrieb: auf der Client-Instanz `jobs: true` und
+`mode: auftrag`, auf dem Engine-Host `jobs: true` und `engineJobs: true`.
+Passt das nicht, meldet auch `POST /analyze` die Ursache im Klartext statt
+eines nackten `HTTP 404`.
+
 Grenzen des Auftragsregisters (bewusst im Speicher, keine Datenbank):
 
 * Ergebnisse werden 30 Minuten vorgehalten, danach verworfen.

@@ -232,16 +232,32 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveInfo(w http.ResponseWriter) {
+	// mode/jobs/engineJobs sind Betriebsdiagnose: Woran sonst sollte man
+	// am Handy erkennen, welchen Stand ein Deployment fährt? "jobs" fehlt
+	// auf älterem Code schlicht — genau das macht Versionsversatz
+	// zwischen Client- und Engine-Instanz mit einem Blick sichtbar.
+	mode := "synchron"
+	status := "entfällt (diese Instanz rechnet selbst)"
+
+	if katagoRemoteConfigured() {
+		mode = "auftrag"
+		status = "GET " + analyzeStatusPath + "?id=… (Auftrag abfragen)"
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"service":  "goteach",
-		"katago":   engineAvailable(),
-		"auth":     authEnabled(),
-		"login":    "POST /login mit JSON {\"username\":…,\"password\":…} → JWT (nur bei aktiver Auth)",
-		"frontend": "GET / (HTML im Browser)",
+		"service":    "goteach",
+		"katago":     engineAvailable(),
+		"auth":       authEnabled(),
+		"jobs":       true,
+		"mode":       mode,
+		"engineJobs": os.Getenv("KATAGO_ENGINE_TOKEN") != "",
+		"login":      "POST /login mit JSON {\"username\":…,\"password\":…} → JWT (nur bei aktiver Auth)",
+		"frontend":   "GET / (HTML im Browser)",
 		"analyze": "POST /analyze mit SGF (roh, Formularfeld oder Datei-Upload \"sgf\") " +
 			"oder ogs=<URL|ID> (online-go.com); Parameter: visits, tau, from, to, " +
 			"rules, komi; download=1 für Datei-Download; bei aktiver Auth mit " +
-			"Authorization: Bearer <Token>",
+			"Authorization: Bearer <Token>; im Auftragsbetrieb 202 mit Auftrags-ID",
+		"status":  status,
 		"warnung": "ohne konfigurierte KataGo-Engine sind alle Werte synthetisch (Mock)",
 		"healthz": "GET /healthz",
 	})
