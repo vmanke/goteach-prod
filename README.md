@@ -314,7 +314,8 @@ SHA-256 der hochgeladenen Bytes:
 
 Inhaltsadressiert heißt: derselbe Upload zweimal ergibt einen Eintrag
 (Antwort 200 statt 201), und die Bytes unter einer ID ändern sich nie —
-also darf der Browser sie ein Jahr behalten.
+also darf der Browser sie ein Jahr behalten und bekommt die ID gleich als
+starkes `ETag` mit.
 
 **Zwei Fassungen derselben Liste.** `GET /photos` antwortet mit JSON;
 `GET /photos?format=lines` mit einer Zeile je Foto, Felder durch `US`

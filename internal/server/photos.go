@@ -380,6 +380,9 @@ func servePhotoFile(w http.ResponseWriter, r *http.Request, name string) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	// Der Name ist der Hash des Inhalts — die Bytes darunter ändern sich nie.
 	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	// Ein starkes ETag, und zwar gratis: der Dateiname IST der Hash des
+	// Inhalts. http.ServeContent beantwortet If-None-Match damit selbst.
+	h.Set("Etag", `"`+strings.TrimSuffix(name, ".jpg")+`"`)
 
 	http.ServeContent(w, r, name, info.ModTime(), file)
 }

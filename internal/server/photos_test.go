@@ -386,6 +386,12 @@ func TestPhotoUploadListFetchDelete(t *testing.T) {
 			t.Errorf("GET %s: nosniff fehlt", path)
 		}
 
+		// Der Dateiname ist der Hash des Inhalts, das ETag also stark und
+		// gratis — ohne es holt jeder Besuch jedes Bild neu.
+		if etag := rr.Header().Get("Etag"); !strings.Contains(etag, meta.ID) {
+			t.Errorf("GET %s: Etag = %q, erwartet die ID darin", path, etag)
+		}
+
 		if _, _, err := image.Decode(bytes.NewReader(rr.Body.Bytes())); err != nil {
 			t.Errorf("GET %s: kein dekodierbares Bild: %v", path, err)
 		}
