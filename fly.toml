@@ -37,7 +37,28 @@ primary_region = 'fra'
   #
   # Sonst schlägt der nächste Deploy beim Start fehl — genau das ist der
   # Zweck, aber es soll niemanden überraschen.
+  #
+  # Für die Galerie ist der Schalter NICHT die Absicherung: requireMember
+  # (internal/server/auth.go) läuft nie offen, auch ohne AUTH_USERS nicht.
+  # Der Schalter deckt weiterhin /analyze ab.
   # GOTEACH_REQUIRE_AUTH = "1"
+
+  # Wo die Fotos der Vereinsgalerie liegen — auf dem Volume unter [[mounts]],
+  # nicht im Container. Ist das Volume nicht eingehängt, startet der Dienst
+  # gar nicht erst (validatePhotoEnv): Fotos, die still im Container landen,
+  # sind beim nächsten Schlafen der Maschine weg.
+  GOTEACH_PHOTO_DIR = "/data/photos"
+
+  # Der öffentliche Signierschlüssel der Vereinsseite, gegen den die Galerie
+  # die Mitglieder-Tokens prüft. Kein Geheimnis: er prüft Tokens, er stellt
+  # keine aus — darum hier versioniert wie die CORS-Origins. Die Quelle ist
+  # frontend/src/keys_generated.rs im Repo der Vereinsseite; nach einem
+  # FLB_KEYGEN=1 dort muss dieser Wert mitwandern.
+  FLB_JWT_PUBLIC_JWK = '{"kty":"EC","crv":"P-256","x":"7JZhsuvgEhe-PKipOJolP_MLvsSUmNhMTC9J3xiVVZw","y":"0zfb0vppJiiCMcRd94FkkjedlCR_usRF4mh_Fv9E4zg"}'
+
+  # Wer fremde Fotos löschen darf. Kommaliste von Namen, wie sie im Token
+  # stehen (sub) — bei Vereins-Tokens das, was FLB_SUB beim Ausstellen war.
+  GOTEACH_PHOTO_ADMINS = "uwe"
 
 [http_service]
   internal_port = 8080
@@ -71,8 +92,26 @@ primary_region = 'fra'
     method = "GET"
     path = "/healthz"
 
+# Der dauerhafte Speicher der Fotogalerie. Anzulegen VOR dem ersten Deploy
+# mit dieser Datei, und in derselben Region wie primary_region:
+#
+#   fly volumes create goteach_photos --region fra --size 3
+#
+# Ein Volume ist einfach repliziert. Geht die Maschine verloren, sind die
+# Fotos weg — das Backup ist Sache des Betreibers (siehe README).
+[[mounts]]
+  source = "goteach_photos"
+  destination = "/data"
+
 [[vm]]
   size = 'performance-4x'
 
 [deploy]
-  strategy = 'bluegreen'
+  # Rolling statt bluegreen, seit unter [[mounts]] ein Volume hängt:
+  # Blue-Green startet die neuen Maschinen NEBEN den alten, ein Fly-Volume
+  # hängt aber immer nur an genau einer. Der Deploy bliebe hängen.
+  #
+  # Aus demselben Grund bleibt die Maschinenzahl bei 1 (fly scale count 1):
+  # eine zweite Maschine hätte kein Volume, und ein dort hochgeladenes Foto
+  # wäre auf der anderen ein 404.
+  strategy = 'rolling'

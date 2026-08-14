@@ -9,6 +9,10 @@
 //	GET  /healthz     Liveness-Check
 //	POST /analyze     SGF (roh, Formularfeld oder Datei-Upload "sgf")
 //	                  → Teaching-Reports als JSON; download=1 als Datei
+//	GET  /photos      Fotogalerie des Vereins (nur mit Ausweis, siehe photos.go)
+//	POST /photos      Foto hochladen (multipart, Feld "photo")
+//	GET  /photos/<id> Bild bzw. /photos/<id>/thumb die Vorschau
+//	DEL  /photos/<id> Foto entfernen (Hochladender oder GOTEACH_PHOTO_ADMINS)
 //	GET  /robots.txt, /sitemap.xml, /app.js, /style.css, /favicon.svg
 //
 // Engine-Wahl über Umgebung: Sind KATAGO_PATH und KATAGO_MODEL gesetzt,
@@ -82,6 +86,10 @@ func Run() error {
 		return fmt.Errorf("Remote-Engine: %w", err)
 	}
 
+	if err := validatePhotoEnv(); err != nil {
+		return fmt.Errorf("Galerie: %w", err)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           Handler(),
@@ -106,6 +114,11 @@ func Handler() http.Handler {
 	mux.HandleFunc("/login", handleLogin)
 	mux.HandleFunc("/analyze", requireAuth(handleAnalyze))
 	mux.HandleFunc("/analyze/status", requireAuth(handleAnalyzeStatus))
+	// Die Galerie (siehe photos.go). requireMember statt requireAuth: sie
+	// nimmt zusätzlich die Mitglieder-Tokens der Vereinsseite an und läuft
+	// nie offen.
+	mux.HandleFunc(photosPath, requireMember(handlePhotos))
+	mux.HandleFunc(photosPath+"/", requireMember(handlePhotoItem))
 	mux.HandleFunc("/engine/analyze", handleEngineAnalyze)
 	mux.HandleFunc("/engine/jobs", handleEngineJobs)
 	mux.HandleFunc("/robots.txt", handleRobots)
@@ -243,7 +256,9 @@ func withCORS(next http.Handler) http.Handler {
 			// Preflight endet hier: der Browser fragt nach, ob POST mit
 			// Content-Type erlaubt ist, und braucht dafür keinen Body.
 			if r.Method == http.MethodOptions {
-				h.Set("Access-Control-Allow-Methods", "GET, POST")
+				// DELETE gehört dazu, seit die Galerie ihre Fotos auch wieder
+				// hergeben muss (DELETE /photos/<id>).
+				h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE")
 				// Authorization gehört dazu, seit /analyze hinter
 				// optionalem JWT-Login liegen kann.
 				h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -342,6 +357,11 @@ func serveInfo(w http.ResponseWriter) {
 			"rules, komi; download=1 für Datei-Download; bei aktiver Auth mit " +
 			"Authorization: Bearer <Token>; im Auftragsbetrieb 202 mit Auftrags-ID",
 		"status":  status,
+		"gallery": galleryEnabled(),
+		"photos": "GET /photos (Liste), POST /photos (multipart, Feld \"photo\", " +
+			"optional \"caption\"), GET /photos/<id> und /photos/<id>/thumb, " +
+			"DELETE /photos/<id>; immer mit Authorization: Bearer <Token> — " +
+			"Vereins-Token oder Token via POST /login",
 		"warnung": "ohne konfigurierte KataGo-Engine sind alle Werte synthetisch (Mock)",
 		"healthz": "GET /healthz",
 	})

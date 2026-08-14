@@ -114,6 +114,10 @@ PORT=8080 ./goteach-server
 | `POST /login`   | Zugangsdaten → JWT (nur bei aktiver Auth, sonst 404)        |
 | `POST /analyze` | SGF → Teaching-Reports als JSON (bei aktiver Auth: `Authorization: Bearer <Token>`). Mit Engine-Host: **202** mit Auftrags-ID statt Ergebnis |
 | `GET /analyze/status` | Zustand und Ergebnis eines Auftrags (`?id=…`); nur bei gesetztem `KATAGO_REMOTE_URL`, sonst 404 |
+| `GET /photos`   | Fotogalerie des Vereins: Liste als JSON (nur mit Ausweis, sonst 401; ohne `GOTEACH_PHOTO_DIR` 404) |
+| `POST /photos`  | Foto hochladen (`multipart/form-data`, Feld `photo`, optional `caption`) |
+| `GET /photos/<id>`, `GET /photos/<id>/thumb` | Bild bzw. Vorschau (JPEG)      |
+| `DELETE /photos/<id>` | Foto entfernen (Hochladender oder `GOTEACH_PHOTO_ADMINS`) |
 | `POST /engine/analyze` | Engine-Passthrough für Remote-Instanzen (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
 | `POST /engine/jobs`, `GET /engine/jobs` | Auftragsbetrieb auf dem Engine-Host (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
 | `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
@@ -258,6 +262,85 @@ Tabs. Ein Rate-Limit auf `/login` gibt es bewusst nicht (der Dienst ist
 zustandslos); die PBKDF2-Kosten bremsen Brute-Force serverseitig.
 Hinweis: Das No-JS-Formular funktioniert bei aktiver Auth nicht — der
 Multipart-POST kann keinen Bearer-Header setzen und erhält 401.
+
+### Fotogalerie des Vereins
+
+Der Dienst nimmt Fotos von Mannschaftsmitgliedern entgegen und liefert sie
+nur an angemeldete Mitglieder zurück. Die Vereinsseite
+(`flascheleer-berlin.de`) zeigt sie unter `/galerie`; sie ist rein statisch
+und hat keinen eigenen Speicher — deshalb liegt die Galerie hier.
+
+| Variable               | Bedeutung                                            |
+|------------------------|------------------------------------------------------|
+| `GOTEACH_PHOTO_DIR`    | Verzeichnis der Fotos. Leer = keine Galerie (alle `/photos`-Routen antworten 404) |
+| `FLB_JWT_PUBLIC_JWK`   | Öffentlicher Signierschlüssel der Vereinsseite (kein Geheimnis) |
+| `GOTEACH_PHOTO_ADMINS` | Kommaliste von Namen, die fremde Fotos löschen dürfen |
+
+**Zwei Ausweise, kein zweites Passwort.** Die Galerie nimmt beides an: das
+offline ausgestellte Mitglieder-Token der Vereinsseite (ES256, geprüft
+gegen `FLB_JWT_PUBLIC_JWK`) und das Dienst-Token aus `POST /login`. Der
+Browser schickt still das erste; wer keins hat, meldet sich mit dem zweiten
+an. Der `sub` des Tokens ist der Hochladende und entscheidet später, wer
+löschen darf.
+
+Anders als `/analyze` läuft die Galerie **nie** offen: fehlt jeder Ausweis,
+antwortet sie 500 statt jeden durchzulassen. `GOTEACH_REQUIRE_AUTH` ist für
+sie also nicht die Absicherung — es bleibt trotzdem empfohlen.
+
+**Was mit einem Foto passiert.** Es wird gestreamt (nicht in den Speicher
+gelesen), dekodiert und **neu kodiert**. Das Neukodieren ist der Kern:
+
+* Es entfernt **EXIF vollständig, inklusive GPS**. Ein Foto vom Spieltag
+  verrät sonst, wo es aufgenommen wurde.
+* Vorher wird die EXIF-Ausrichtung ins Bild gerechnet — sonst läge jede
+  Hochkant-Aufnahme vom Handy in der Galerie auf der Seite.
+* Was nicht als Bild dekodiert, kommt nicht auf die Platte. Ein als Foto
+  getarntes SVG kann dieser Dienst später nicht als aktiven Inhalt
+  ausliefern; der Content-Type wird beim Ausliefern gesetzt, nie übernommen.
+
+Grenzen: 12 MB pro Datei, **JPEG und PNG**, 2000 Fotos. iPhones speichern
+von Haus aus **HEIC**, und das dekodiert die Go-Standardbibliothek nicht —
+solche Uploads werden mit dem Hinweis abgelehnt, in den Kameraeinstellungen
+„Maximale Kompatibilität" zu wählen.
+
+**Ablage.** Keine Datenbank. Pro Foto drei Dateien, benannt nach dem
+SHA-256 der hochgeladenen Bytes:
+
+```
+/data/photos/<id>.jpg        das Bild, neu kodiert, ohne EXIF
+/data/photos/<id>.thumb.jpg  Vorschau, längste Kante 480 px
+/data/photos/<id>.json       wer, wann, wie groß, welche Bildunterschrift
+```
+
+Inhaltsadressiert heißt: derselbe Upload zweimal ergibt einen Eintrag
+(Antwort 200 statt 201), und die Bytes unter einer ID ändern sich nie —
+also darf der Browser sie ein Jahr behalten.
+
+**Das Volume ist die einzige Kopie.** Die Fotos liegen auf einem Fly-Volume
+(`[[mounts]]` in `fly.toml`), das vor dem ersten Deploy anzulegen ist:
+
+```bash
+fly volumes create goteach_photos --region fra --size 3
+```
+
+Drei Dinge hängen daran, und alle drei stehen so in der `fly.toml`:
+
+1. `[deploy] strategy = 'rolling'` — Blue-Green startet neue Maschinen
+   neben den alten, ein Volume hängt aber nur an genau einer.
+2. `fly scale count 1` — eine zweite Maschine hätte kein Volume, und ein
+   dort hochgeladenes Foto wäre auf der anderen ein 404.
+3. Ist das Volume nicht eingehängt, **startet der Dienst nicht**. Ohne
+   diese Prüfung legte er das Verzeichnis stillschweigend im Container an,
+   und die Fotos wären beim nächsten Schlafen der Maschine weg — ohne dass
+   je ein Fehler zu sehen gewesen wäre.
+
+Ein Fly-Volume ist einfach repliziert; Fly empfiehlt ausdrücklich eigene
+Sicherungen. Bis das jemand einrichtet, gilt: **die Galerie ist kein
+Archiv.** Ein Abzug von Hand:
+
+```bash
+fly ssh sftp get /data/photos ./backup-photos
+```
 
 ### Remote-Engine: Analyse auf einem zweiten Host
 

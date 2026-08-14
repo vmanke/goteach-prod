@@ -33,14 +33,17 @@ func serveEnv(t *testing.T, req *http.Request,
 	t.Helper()
 
 	base := map[string]string{
-		"KATAGO_PATH":         "",
-		"KATAGO_MODEL":        "",
-		"KATAGO_REMOTE_URL":   "",
-		"KATAGO_REMOTE_TOKEN": "",
-		"KATAGO_ENGINE_TOKEN": "",
-		"AUTH_USERS":          "",
-		"AUTH_JWT_SECRET":     "",
-		"AUTH_TOKEN_TTL":      "",
+		"KATAGO_PATH":          "",
+		"KATAGO_MODEL":         "",
+		"KATAGO_REMOTE_URL":    "",
+		"KATAGO_REMOTE_TOKEN":  "",
+		"KATAGO_ENGINE_TOKEN":  "",
+		"AUTH_USERS":           "",
+		"AUTH_JWT_SECRET":      "",
+		"AUTH_TOKEN_TTL":       "",
+		"GOTEACH_PHOTO_DIR":    "",
+		"GOTEACH_PHOTO_ADMINS": "",
+		memberKeyEnv:           "",
 	}
 
 	for k, v := range env {

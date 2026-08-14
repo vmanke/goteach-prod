@@ -1,0 +1,48 @@
+# Baut und testet den Dienst bei jedem Push und jedem Pull Request.
+#
+# Bis hierher gab es nur fly-deploy.yml: ein Push auf main ging ungeprüft
+# nach Produktion. Bei einer reinen Rechen-API war das noch zu vertreten —
+# seit der Dienst Dateien entgegennimmt und dauerhaft ablegt, nicht mehr.
+name: Test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Die Version kommt aus der go.mod, damit hier und im Dockerfile
+      # dasselbe Go steht.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # gofmt ist kein Geschmacksurteil, sondern der Formatstand, auf den
+      # sich jedes Diff in diesem Repo verlässt.
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l .)
+          test -z "$unformatted" || {
+            echo "::error::nicht formatiert: $unformatted"; exit 1; }
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...

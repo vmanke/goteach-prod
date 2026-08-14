@@ -3,11 +3,18 @@
 // Ohne AUTH_USERS bleibt der Dienst offen (Log-Warnung) — lokale
 // Entwicklung, Tests und bestehende Deployments laufen unverändert.
 // AUTH_USERS ohne AUTH_JWT_SECRET ist Fehlkonfiguration: fail closed.
+//
+// Daneben steht requireMember: der Zugang der Galerie, der zusätzlich die
+// offline ausgestellten Mitglieder-Tokens der Vereinsseite annimmt
+// (ES256, öffentlicher Schlüssel aus FLB_JWT_PUBLIC_JWK) — und der im
+// Unterschied zu requireAuth niemals offen läuft.
 package server
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -285,6 +292,126 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r)
 	}
+}
+
+// memberKeyEnv trägt den öffentlichen Signierschlüssel der Vereinsseite
+// (der JWK aus deren frontend/src/keys_generated.rs). Kein Geheimnis — er
+// prüft Tokens, er stellt keine aus — und darf darum wie die CORS-Origins
+// versioniert in der fly.toml stehen.
+const memberKeyEnv = "FLB_JWT_PUBLIC_JWK"
+
+// memberKey liest den Vereinsschlüssel aus der Umgebung. (nil, nil) heißt
+// „nicht konfiguriert"; ein Fehler heißt „konfiguriert, aber kaputt" — und
+// das darf nicht als „Weg nicht verfügbar" durchgehen.
+func memberKey() (*ecdsa.PublicKey, error) {
+	raw := strings.TrimSpace(os.Getenv(memberKeyEnv))
+
+	if raw == "" {
+		return nil, nil
+	}
+
+	pub, err := auth.PublicKeyFromJWK(raw)
+
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", memberKeyEnv, err)
+	}
+
+	return pub, nil
+}
+
+// requireMember schützt einen Handler und reicht den Inhaber weiter.
+//
+// Zwei Ausweise werden angenommen, in dieser Reihenfolge:
+//
+//  1. Der Mitglieder-Token der Vereinsseite (ES256, FLB_JWT_PUBLIC_JWK).
+//     Den haben die Mitglieder ohnehin schon; sie brauchen kein zweites
+//     Passwort, und der Browser schickt ihn still aus dem localStorage.
+//  2. Das Dienst-Token aus POST /login (HS256, AUTH_USERS) — derselbe Weg,
+//     den die Analyse-Seite geht, und der einzige, der sich serverseitig
+//     sofort entziehen lässt.
+//
+// Anders als requireAuth läuft das hier NIE offen. Ohne Login ist /analyze
+// eine Kostenfrage; eine offene Galerie wären Fotos von Vereinsmitgliedern
+// im freien Netz. Ist gar kein Ausweis konfiguriert, ist das
+// Fehlkonfiguration und keine Einladung.
+func requireMember(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pub, err := memberKey()
+
+		if err != nil {
+			log.Printf("goteach-server: Auth fehlkonfiguriert: %v", err)
+			httpError(w, http.StatusInternalServerError, "Auth fehlkonfiguriert")
+
+			return
+		}
+
+		if pub == nil && !authEnabled() {
+			log.Printf("goteach-server: Galerie ohne jeden Ausweis konfiguriert "+
+				"(weder %s noch AUTH_USERS)", memberKeyEnv)
+			httpError(w, http.StatusInternalServerError, "Auth fehlkonfiguriert")
+
+			return
+		}
+
+		token, ok := bearerToken(r)
+
+		if !ok {
+			denyMember(w, "Login nötig: Authorization: Bearer <Token> "+
+				"(Vereins-Token oder Token via POST /login)")
+
+			return
+		}
+
+		now := time.Now()
+
+		if pub != nil {
+			if claims, err := auth.VerifyES256(pub, token, now); err == nil {
+				next(w, r, claims.Sub)
+
+				return
+			}
+		}
+
+		if !authEnabled() {
+			denyMember(w, "Token ungültig")
+
+			return
+		}
+
+		users, secret, err := authConfig()
+
+		if err != nil {
+			log.Printf("goteach-server: Auth fehlkonfiguriert: %v", err)
+			httpError(w, http.StatusInternalServerError, "Auth fehlkonfiguriert")
+
+			return
+		}
+
+		claims, err := auth.VerifyHS256(secret, token, now)
+
+		if err != nil {
+			denyMember(w, "Token ungültig")
+
+			return
+		}
+
+		// Wie in requireAuth: Signatur und Ablauf genügen nicht, der Benutzer
+		// muss noch existieren — Entfernen aus AUTH_USERS wirkt sofort.
+		if _, ok := users[claims.Sub]; !ok || claims.Iss != tokenIssuer {
+			denyMember(w, "Token ungültig: Benutzer unbekannt")
+
+			return
+		}
+
+		next(w, r, claims.Sub)
+	}
+}
+
+// denyMember antwortet einheitlich 401. Einheitlich ist Absicht: welcher der
+// beiden Wege gescheitert ist, geht den Aufrufer nichts an.
+func denyMember(w http.ResponseWriter, msg string) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	httpError(w, http.StatusUnauthorized, "%s", msg)
 }
 
 // bearerToken extrahiert das Token aus "Authorization: Bearer <Token>".
