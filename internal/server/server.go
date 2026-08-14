@@ -117,25 +117,109 @@ func Handler() http.Handler {
 	return withRecover(withCORS(mux))
 }
 
+// originList entscheidet, ob ein Origin freigegeben ist: entweder er
+// steht wörtlich in der Liste, oder er passt auf einen Eintrag mit
+// genau einem Stern.
+type originList struct {
+	exact    map[string]bool
+	patterns [][2]string // Präfix und Suffix links und rechts des Sterns
+}
+
+// unsafeInWildcard sind die Zeichen, die der Stern nicht überspringen
+// darf. Ohne diese Sperre würde
+// "https://flaleer-berlin-git-*-vmankes-projects.vercel.app" auch auf
+// "https://flaleer-berlin-git-x.angreifer.example/-vmankes-projects.vercel.app"
+// passen — der Stern stünde dann für einen ganzen fremden Host.
+const unsafeInWildcard = "./:@?#"
+
 // corsOrigins liest die erlaubten Cross-Origin-Absender aus
 // GOTEACH_CORS_ORIGINS (kommagetrennt). Ohne Umgebung gilt die
 // Vereinshomepage, die den Dienst aus dem Browser aufruft.
-func corsOrigins() map[string]bool {
+//
+// Ein Eintrag darf einen Stern enthalten. Nötig ist das für die
+// Vorschau-Deployments der Vereinsseite: deren Host trägt den Branch-
+// Namen ("flaleer-berlin-git-<branch>-<team>.vercel.app") und ist
+// darum vorab nicht bekannt. Der Stern deckt genau ein Namensstück ab,
+// nie einen Punkt — "*.vercel.app" als Eintrag gäbe jeder fremden
+// Vercel-Seite Zugriff auf den Dienst, ein Muster mit festem Team-
+// Suffix nicht.
+func corsOrigins() originList {
 	raw := os.Getenv("GOTEACH_CORS_ORIGINS")
 
 	if raw == "" {
 		raw = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de"
 	}
 
-	out := map[string]bool{}
+	list := originList{exact: map[string]bool{}}
 
 	for _, origin := range strings.Split(raw, ",") {
-		if origin = strings.TrimSpace(origin); origin != "" {
-			out[origin] = true
+		origin = strings.TrimSpace(origin)
+
+		if origin == "" {
+			continue
 		}
+
+		prefix, suffix, hasStar := strings.Cut(origin, "*")
+
+		// Nur ein Stern, und er muss mitten in einem Namensstück
+		// stehen: grenzt er an einen Punkt oder an "//", deckt er ein
+		// ganzes Stück des Hosts ab, und "https://*.vercel.app" gäbe
+		// jeder fremden Vercel-Seite Zugriff. Ein Eintrag, der das
+		// nicht erfüllt, gilt wörtlich und passt damit auf nichts.
+		if !hasStar || strings.Contains(suffix, "*") ||
+			!anchored(prefix, suffix) {
+			list.exact[origin] = true
+
+			continue
+		}
+
+		list.patterns = append(list.patterns, [2]string{prefix, suffix})
 	}
 
-	return out
+	return list
+}
+
+// anchored sagt, ob der Stern zwischen prefix und suffix von beiden
+// Seiten in einem Namensstück festgehalten wird.
+func anchored(prefix, suffix string) bool {
+	if prefix == "" || suffix == "" {
+		return false
+	}
+
+	last := prefix[len(prefix)-1]
+	first := suffix[0]
+
+	return !strings.ContainsRune(unsafeInWildcard, rune(last)) &&
+		!strings.ContainsRune(unsafeInWildcard, rune(first))
+}
+
+// permits prüft einen Origin gegen Liste und Muster.
+func (l originList) permits(origin string) bool {
+	if l.exact[origin] {
+		return true
+	}
+
+	for _, p := range l.patterns {
+		prefix, suffix := p[0], p[1]
+
+		if len(origin) <= len(prefix)+len(suffix) {
+			continue
+		}
+
+		if !strings.HasPrefix(origin, prefix) || !strings.HasSuffix(origin, suffix) {
+			continue
+		}
+
+		middle := origin[len(prefix) : len(origin)-len(suffix)]
+
+		if strings.ContainsAny(middle, unsafeInWildcard) {
+			continue
+		}
+
+		return true
+	}
+
+	return false
 }
 
 // withCORS beantwortet Cross-Origin-Aufrufe der erlaubten Absender.
@@ -152,7 +236,7 @@ func withCORS(next http.Handler) http.Handler {
 		// einem erlaubten Absender ausliefern.
 		w.Header().Add("Vary", "Origin")
 
-		if origin := r.Header.Get("Origin"); origin != "" && allowed[origin] {
+		if origin := r.Header.Get("Origin"); origin != "" && allowed.permits(origin) {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 
