@@ -15,12 +15,17 @@ primary_region = 'fra'
   # Geheimnisse — öffentliche Origins, darum hier versioniert statt als
   # Secret: die Vereinsseite unter ihrer Domain und unter Vercel.
   #
-  # Der letzte Eintrag deckt die Vorschau-Deployments ab. Deren Host trägt
-  # den Branch-Namen ("…-git-<branch>-…") und steht vorab nicht fest; der
-  # Stern springt genau über dieses eine Namensstück, nie über einen Punkt.
-  # Darum ist das Team-Suffix Teil des Musters: "*.vercel.app" wäre eine
-  # Freigabe für jede fremde Seite auf Vercel.
-  GOTEACH_CORS_ORIGINS = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de,https://flaleer-berlin.vercel.app,https://flaleer-berlin-git-*-vmankes-projects.vercel.app"
+  # Der letzte Eintrag deckt die Vorschau-Deployments ab. Vercel vergibt
+  # dafür zwei Formen von Host, und beide stehen vorab nicht fest:
+  #
+  #   flaleer-berlin-git-<branch>-vmankes-projects.vercel.app
+  #   flaleer-berlin-<deployment>-vmankes-projects.vercel.app
+  #
+  # Der Stern deckt beide ab — er springt über genau ein Namensstück, nie
+  # über einen Punkt. Projektname und Team-Suffix bleiben fest: gebunden
+  # ist die Freigabe damit an dieses Projekt in diesem Team, während
+  # "*.vercel.app" jede fremde Seite auf Vercel einschlösse.
+  GOTEACH_CORS_ORIGINS = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de,https://flaleer-berlin.vercel.app,https://flaleer-berlin-*-vmankes-projects.vercel.app"
 
   # Empfohlen, aber bewusst noch nicht aktiv: Mit GOTEACH_REQUIRE_AUTH = "1"
   # startet der Dienst nicht mehr, wenn AUTH_USERS fehlt — statt still
