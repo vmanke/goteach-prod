@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -270,12 +271,48 @@ func handlePhotos(w http.ResponseWriter, r *http.Request, who string) {
 			return
 		}
 
+		if r.URL.Query().Get("format") == "lines" {
+			writePhotoLines(w, photos)
+
+			return
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"photos": photos})
 	case http.MethodPost:
 		uploadPhoto(w, r, who)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, POST")
 		httpError(w, http.StatusMethodNotAllowed, "GET oder POST erwartet")
+	}
+}
+
+// photoFieldSep trennt die Felder einer Zeile in der Fassung `format=lines`
+// (US, ASCII 31). Er kann in keinem Feld vorkommen: cleanText ersetzt jedes
+// Steuerzeichen durch ein Leerzeichen, und die übrigen Felder sind ID,
+// Zeitstempel und Zahlen.
+const photoFieldSep = "\x1f"
+
+// writePhotoLines gibt die Liste als eine Zeile je Foto aus.
+//
+// Warum eine zweite Fassung derselben Liste: Der wasm-Client der
+// Vereinsseite trägt bewusst keinen JSON-Parser — Inhalte sind dort
+// generierte Konstanten, und ein Parser im Bundle wäre der einzige Grund,
+// einen zu haben. Für den Analyse-Stream gibt es aus demselben Grund schon
+// `format=lines`; das hier ist dieselbe Antwort auf dieselbe Frage.
+func writePhotoLines(w http.ResponseWriter, photos []photoMeta) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	for _, p := range photos {
+		fmt.Fprint(w, strings.Join([]string{
+			p.ID,
+			p.Name,
+			p.Caption,
+			p.Uploader,
+			p.UploadedAt,
+			strconv.Itoa(p.Width),
+			strconv.Itoa(p.Height),
+			strconv.FormatInt(p.Bytes, 10),
+		}, photoFieldSep)+"\n")
 	}
 }
 

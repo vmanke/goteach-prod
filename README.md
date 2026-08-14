@@ -114,7 +114,7 @@ PORT=8080 ./goteach-server
 | `POST /login`   | Zugangsdaten → JWT (nur bei aktiver Auth, sonst 404)        |
 | `POST /analyze` | SGF → Teaching-Reports als JSON (bei aktiver Auth: `Authorization: Bearer <Token>`). Mit Engine-Host: **202** mit Auftrags-ID statt Ergebnis |
 | `GET /analyze/status` | Zustand und Ergebnis eines Auftrags (`?id=…`); nur bei gesetztem `KATAGO_REMOTE_URL`, sonst 404 |
-| `GET /photos`   | Fotogalerie des Vereins: Liste als JSON (nur mit Ausweis, sonst 401; ohne `GOTEACH_PHOTO_DIR` 404) |
+| `GET /photos`   | Fotogalerie des Vereins: Liste als JSON, mit `?format=lines` als Zeilen (nur mit Ausweis, sonst 401; ohne `GOTEACH_PHOTO_DIR` 404) |
 | `POST /photos`  | Foto hochladen (`multipart/form-data`, Feld `photo`, optional `caption`) |
 | `GET /photos/<id>`, `GET /photos/<id>/thumb` | Bild bzw. Vorschau (JPEG)      |
 | `DELETE /photos/<id>` | Foto entfernen (Hochladender oder `GOTEACH_PHOTO_ADMINS`) |
@@ -315,6 +315,21 @@ SHA-256 der hochgeladenen Bytes:
 Inhaltsadressiert heißt: derselbe Upload zweimal ergibt einen Eintrag
 (Antwort 200 statt 201), und die Bytes unter einer ID ändern sich nie —
 also darf der Browser sie ein Jahr behalten.
+
+**Zwei Fassungen derselben Liste.** `GET /photos` antwortet mit JSON;
+`GET /photos?format=lines` mit einer Zeile je Foto, Felder durch `US`
+(ASCII 31) getrennt:
+
+```
+<id>␟<name>␟<caption>␟<uploader>␟<uploadedAt>␟<w>␟<h>␟<bytes>
+```
+
+Der wasm-Client der Vereinsseite trägt bewusst keinen JSON-Parser —
+Inhalte sind dort generierte Konstanten, und ein Parser im Bundle wäre der
+einzige Grund, einen zu haben. Für den Analyse-Stream gibt es aus demselben
+Grund schon `format=lines`. Der Trenner kann in keinem Feld auftauchen:
+Name und Bildunterschrift laufen durch `cleanText`, das jedes Steuerzeichen
+durch ein Leerzeichen ersetzt.
 
 **Das Volume ist die einzige Kopie.** Die Fotos liegen auf einem Fly-Volume
 (`[[mounts]]` in `fly.toml`), das vor dem ersten Deploy anzulegen ist:

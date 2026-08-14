@@ -442,6 +442,44 @@ func TestPhotoUploadIsIdempotent(t *testing.T) {
 	}
 }
 
+// Die Zeilenfassung ist das, was der wasm-Client der Vereinsseite liest —
+// er trägt bewusst keinen JSON-Parser.
+func TestPhotoListAsLines(t *testing.T) {
+	env := galleryEnv(t)
+	token := serviceToken(t, "alice")
+
+	meta := decodeMeta(t, serveEnv(t, uploadRequest(t, token, testJPEG(t, 60, 40),
+		"spieltag.jpg", "Runde 3\tgegen TriLux"), env))
+
+	req := photoRequest(http.MethodGet, photosPath+"?format=lines", token, nil, "")
+	rr := serveEnv(t, req, env)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d", rr.Code)
+	}
+
+	body := strings.TrimSuffix(rr.Body.String(), "\n")
+	fields := strings.Split(body, photoFieldSep)
+
+	if len(fields) != 8 {
+		t.Fatalf("Zeile hat %d Felder, erwartet 8: %q", len(fields), body)
+	}
+
+	if fields[0] != meta.ID || fields[1] != "spieltag.jpg" || fields[3] != "alice" {
+		t.Errorf("Felder falsch: %q", fields)
+	}
+
+	// Das Tabulatorzeichen aus der Bildunterschrift darf die Zeile nicht
+	// zerlegen: cleanText ersetzt jedes Steuerzeichen durch ein Leerzeichen.
+	if strings.ContainsAny(body, "\x1e\t\n") {
+		t.Errorf("Steuerzeichen in der Zeile: %q", body)
+	}
+
+	if fields[5] != "60" || fields[6] != "40" {
+		t.Errorf("Maße = %q x %q, erwartet 60 x 40", fields[5], fields[6])
+	}
+}
+
 // --------------------------------------------------------------- Ablehnung
 
 func TestPhotoRejectsWhatIsNotAnImage(t *testing.T) {
