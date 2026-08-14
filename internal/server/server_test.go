@@ -1176,14 +1176,15 @@ func TestCORSAllowsTheClubSiteOnly(t *testing.T) {
 	}
 }
 
-// Die Vorschau-Deployments der Vereinsseite laufen unter einem Host, der
-// den Branch-Namen trägt und darum vorab nicht bekannt ist. Ein Eintrag
-// mit Stern deckt sie ab — aber nur sie: der Stern steht für genau ein
-// Namensstück, nie für einen Punkt oder einen Schrägstrich.
+// Die Vorschau-Deployments der Vereinsseite laufen unter Hosts, die vorab
+// nicht bekannt sind: Vercel vergibt sie mit dem Branch-Namen ODER mit
+// einer Deployment-Kennung. Ein Eintrag mit Stern deckt beide ab — aber
+// nur sie: der Stern steht für genau ein Namensstück, nie für einen Punkt
+// oder einen Schrägstrich.
 func TestCORSWildcardCoversPreviewsAndNothingElse(t *testing.T) {
 	t.Setenv("GOTEACH_CORS_ORIGINS",
 		"https://flascheleer-berlin.de,"+
-			"https://flaleer-berlin-git-*-vmankes-projects.vercel.app")
+			"https://flaleer-berlin-*-vmankes-projects.vercel.app")
 
 	list := corsOrigins()
 
@@ -1195,14 +1196,18 @@ func TestCORSWildcardCoversPreviewsAndNothingElse(t *testing.T) {
 		{"https://flascheleer-berlin.de", true,
 			"der wörtliche Eintrag"},
 		{"https://flaleer-berlin-git-claude-flaleer-berli-5e65cf-vmankes-projects.vercel.app", true,
-			"eine Vorschau dieses Projekts"},
+			"die Vorschau eines Branches"},
+		{"https://flaleer-berlin-ptduxvcxi-vmankes-projects.vercel.app", true,
+			"dieselbe Bereitstellung unter ihrer Deployment-Kennung"},
 		{"https://flaleer-berlin-git-main-fremdteam-projects.vercel.app", false,
 			"eine Vorschau eines fremden Teams"},
-		{"https://flaleer-berlin-git-x.angreifer.example/-vmankes-projects.vercel.app", false,
+		{"https://fremdprojekt-git-main-vmankes-projects.vercel.app", false,
+			"ein anderes Projekt desselben Teams"},
+		{"https://flaleer-berlin-x.angreifer.example/-vmankes-projects.vercel.app", false,
 			"ein fremder Host, der das Suffix nur im Pfad trägt"},
-		{"https://flaleer-berlin-git-x.sub-vmankes-projects.vercel.app", false,
+		{"https://flaleer-berlin-x.sub-vmankes-projects.vercel.app", false,
 			"ein Stern, der einen Punkt überspringen müsste"},
-		{"https://flaleer-berlin-git--vmankes-projects.vercel.app", false,
+		{"https://flaleer-berlin--vmankes-projects.vercel.app", false,
 			"ein leeres Namensstück"},
 		{"https://evil.example", false, "ein fremder Absender"},
 	}
