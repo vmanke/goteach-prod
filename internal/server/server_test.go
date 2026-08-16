@@ -1320,33 +1320,38 @@ func TestAnalyzeJobStatusInLinesFormat(t *testing.T) {
 
 	var body string
 
-	for range 100 {
+	// Abgefragt wird, bis der Abschluss-Satz da ist — nicht bis zur ersten
+	// 200. Der Feed kommt absichtlich schon unvollständig heraus, und ein
+	// Test, der die erste Antwort für das Ende hielte, wäre nur zufällig
+	// grün.
+	for range 200 {
 		status := serve(t, httptest.NewRequest(http.MethodGet, url, nil))
 
-		if status.Code == http.StatusAccepted {
-			// Solange gerechnet wird: kein Körper, aber die bisherige
-			// Rechenzeit im Header — sonst wüsste ein Client ohne
-			// JSON-Parser nichts über den Fortschritt.
+		if status.Header().Get(elapsedHeader) == "" {
+			t.Errorf("Antwort ohne %s — der Client hätte nichts anzuzeigen",
+				elapsedHeader)
+		}
+
+		switch status.Code {
+		case http.StatusAccepted:
+			// Vor dem Kopfsatz gibt es nichts zu lesen: die Engine startet
+			// noch.
 			if status.Body.Len() != 0 {
 				t.Errorf("202 mit Körper: %q", status.Body.String())
 			}
 
-			if status.Header().Get(elapsedHeader) == "" {
-				t.Errorf("202 ohne %s", elapsedHeader)
-			}
+		case http.StatusOK:
+			body = status.Body.String()
 
-			time.Sleep(20 * time.Millisecond)
-
-			continue
-		}
-
-		if status.Code != http.StatusOK {
+		default:
 			t.Fatalf("Status = %d — Body: %s", status.Code, status.Body.String())
 		}
 
-		body = status.Body.String()
+		if strings.Contains(body, linesRecordSep+"Z"+linesFieldSep) {
+			break
+		}
 
-		break
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if body == "" {

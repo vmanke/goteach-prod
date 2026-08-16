@@ -71,6 +71,16 @@ type job struct {
 	Result  *analyzeResponse
 	Created time.Time
 	Done    time.Time
+
+	// Feed ist derselbe Körper, den der synchrone Weg mit format=lines
+	// schickt — aber schon während der Rechnung, Satz für Satz.
+	//
+	// Ohne ihn müsste der Auftragsbetrieb zwischen zwei Übeln wählen:
+	// entweder der Leser sieht minutenlang nichts, oder er hängt an einer
+	// Verbindung, deren Abriss die ganze Rechnung kostet. Mit ihm sieht er
+	// jeden Zug, sobald er fertig ist, und ein Neuladen setzt dort auf,
+	// wo er war.
+	Feed []byte
 }
 
 // jobStore hält die Aufträge im Speicher.
@@ -233,6 +243,31 @@ func (s *jobStore) update(id string, fn func(*job)) {
 	}
 }
 
+// appendRecord hängt einen fertigen Satz an den Feed des Auftrags. Unter
+// derselben Sperre wie alles andere: geschrieben wird aus der Rechen-
+// Goroutine, gelesen aus dem Handler.
+func (s *jobStore) appendRecord(id, record string) {
+	s.update(id, func(j *job) {
+		j.Feed = append(j.Feed, record...)
+		j.Feed = append(j.Feed, linesRecordSep...)
+	})
+}
+
+// feed liefert eine Kopie des bisherigen Feeds. Eine Kopie, weil der
+// Aufrufer sie ohne Sperre schreibt, während die Rechnung weiterläuft.
+func (s *jobStore) feed(id string) ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+
+	if !ok {
+		return nil, false
+	}
+
+	return append([]byte(nil), j.Feed...), true
+}
+
 // run rechnet den Auftrag. Läuft in einer eigenen Goroutine und wartet
 // zuerst auf den freien Rechenplatz.
 func (s *jobStore) run(id string, game *board.Game, opt teaching.Options) {
@@ -243,7 +278,12 @@ func (s *jobStore) run(id string, game *board.Game, opt teaching.Options) {
 
 	// Immer die LOKALE Engine (oder der Mock) — nie katago.Remote, sonst
 	// reichen sich zwei Instanzen die Arbeit im Kreis weiter.
-	resp, _, err := computeAnalysis(game, opt, startLocalAnalyzer)
+	//
+	// Jeder fertige Satz geht sofort in den Feed des Auftrags: Der Leser
+	// sieht die Züge einzeln kommen, ohne an der Verbindung zu hängen,
+	// über die er sie abholt.
+	resp, _, err := computeAnalysisEmitting(game, opt, startLocalAnalyzer,
+		func(record string) { s.appendRecord(id, record) })
 
 	s.update(id, func(j *job) {
 		j.Done = time.Now()

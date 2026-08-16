@@ -176,6 +176,53 @@ func TestEngineJobRejectsBadParams(t *testing.T) {
 	}
 }
 
+// Das Neue am Auftrag: sein Feed ist lesbar, WÄHREND gerechnet wird. Ohne
+// das müsste der Auftragsbetrieb zwischen Fortschrittsanzeige und
+// Wiederaufnahme wählen — hier steht, dass er das nicht muss.
+//
+// Am Register statt über HTTP, weil die Mock-Engine zu schnell ist, um
+// einen Zwischenstand verlässlich zu treffen.
+func TestAJobsFeedIsReadableWhileItGrows(t *testing.T) {
+	store := newJobStore()
+	id := "test"
+
+	store.jobs[id] = &job{ID: id, Status: jobRunning, Created: time.Now()}
+
+	if feed, ok := store.feed(id); !ok || len(feed) != 0 {
+		t.Fatalf("frischer Auftrag: feed = %q, ok = %v", feed, ok)
+	}
+
+	store.appendRecord(id, linesRecord("H", "19", "7.5", "Japanisch", "180", "false"))
+
+	half, ok := store.feed(id)
+
+	if !ok || !strings.HasPrefix(string(half), "H"+linesFieldSep) {
+		t.Fatalf("nach dem Kopfsatz: feed = %q", half)
+	}
+
+	store.appendRecord(id, linesRecord("M", "1", "Schwarz", "Q16"))
+
+	full, _ := store.feed(id)
+
+	if len(full) <= len(half) {
+		t.Errorf("Feed wuchs nicht: %d → %d Bytes", len(half), len(full))
+	}
+
+	// Die Kopie darf sich nicht mitverändern: sonst schriebe der Handler in
+	// denselben Puffer, in den die Rechen-Goroutine gerade schreibt.
+	half = append(half, 'x')
+
+	again, _ := store.feed(id)
+
+	if len(again) != len(full) {
+		t.Error("feed() gibt keine Kopie heraus")
+	}
+
+	if _, ok := store.feed("gibtesnicht"); ok {
+		t.Error("unbekannte ID meldet einen Feed")
+	}
+}
+
 // Ohne Engine-Host bleibt /analyze synchron — das ist der
 // Regressionsschutz für lokale Nutzung, CLI und Mock.
 //

@@ -329,6 +329,17 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Der eigene Auftrag führt seinen Feed schon während der Rechnung
+		// mit — der Leser bekommt also den Stand von jetzt, nicht erst das
+		// Endergebnis. Ob er vollständig ist, sagt der Abschluss-Satz
+		// darin; der Client entscheidet das ohnehin selbst, weil ein
+		// abgerissener Strom für ihn genauso aussieht.
+		if wantsLines(r) {
+			serveLocalFeed(w, id)
+
+			return
+		}
+
 		reply, status, err = localJob(id)
 	}
 
@@ -348,7 +359,7 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 	// Kompaktformat vor allem anderen: der Client, der es anfordert, hat
 	// bewusst keinen JSON-Parser, und ein Accept-Header entscheidet das
 	// nicht so eindeutig wie ein ausdrücklicher Parameter.
-	if strings.EqualFold(r.URL.Query().Get("format"), "lines") {
+	if wantsLines(r) {
 		writeStatusLines(w, reply)
 
 		return
@@ -361,6 +372,47 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, reply)
+}
+
+// wantsLines meldet, ob der Aufrufer das Kompaktformat verlangt.
+func wantsLines(r *http.Request) bool {
+	return strings.EqualFold(r.URL.Query().Get("format"), "lines")
+}
+
+// serveLocalFeed liefert den Feed eines eigenen Auftrags, so weit er
+// gediehen ist.
+//
+// Solange der Kopf fehlt, steht die Engine noch: dann 202 mit der
+// bisherigen Rechenzeit im Header, damit der Leser etwas anzuzeigen hat.
+// Sobald ein Kopf da ist, geht der Feed hinaus — unvollständig ist er
+// nicht schlimmer als ein Strom, der noch läuft, und der Client liest
+// beides mit demselben Leser.
+func serveLocalFeed(w http.ResponseWriter, id string) {
+	j, ok := jobs.get(id)
+
+	if !ok {
+		httpError(w, http.StatusNotFound,
+			"Auftrag %q unbekannt (abgelaufen oder Dienst neu gestartet)", id)
+
+		return
+	}
+
+	feed, _ := jobs.feed(id)
+
+	if len(feed) == 0 {
+		w.Header().Set(elapsedHeader,
+			strconv.FormatFloat(time.Since(j.Created).Seconds(), 'f', 1, 64))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusAccepted)
+
+		return
+	}
+
+	w.Header().Set(elapsedHeader,
+		strconv.FormatFloat(time.Since(j.Created).Seconds(), 'f', 1, 64))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(feed)
 }
 
 // elapsedHeader trägt die bisherige Rechenzeit einer noch laufenden

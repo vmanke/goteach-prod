@@ -765,6 +765,25 @@ func sanitizeFloats(v reflect.Value) {
 func computeAnalysis(game *board.Game, opt teaching.Options,
 	start func() (katago.Analyzer, bool, error)) (analyzeResponse, int, error) {
 
+	return computeAnalysisEmitting(game, opt, start, nil)
+}
+
+// computeAnalysisEmitting ist dieselbe Rechnung, gibt aber jeden fertigen
+// Satz des Kompaktformats sofort an emit weiter: Kopf und Vorgabesteine,
+// sobald die Engine steht, danach jeden Zug und jeden Erzählstrang, zum
+// Schluss den Abschluss-Satz.
+//
+// Wer beides braucht, bekommt beides aus EINER Rechnung — den fertigen
+// Report für JSON und die No-JS-Seite, und den wachsenden Feed für einen
+// Leser, der schon während der Rechnung etwas sehen will. Der
+// Auftragsbetrieb ist genau dieser Fall: ohne das müsste er sich zwischen
+// Fortschritt und Wiederaufnahme entscheiden.
+//
+// emit darf nil sein; dann ist dies wörtlich der bisherige Weg.
+func computeAnalysisEmitting(game *board.Game, opt teaching.Options,
+	start func() (katago.Analyzer, bool, error),
+	emit func(string)) (analyzeResponse, int, error) {
+
 	an, synthetic, err := start()
 
 	if err != nil {
@@ -777,26 +796,6 @@ func computeAnalysis(game *board.Game, opt teaching.Options,
 			log.Printf("goteach-server: Analyzer schließen: %v", err)
 		}
 	}()
-
-	report, err := teaching.AnalyzeGame(game, an, opt)
-
-	if err != nil {
-		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
-		// kein internes Problem dieser Instanz.
-		if errors.Is(err, katago.ErrRemote) {
-			return analyzeResponse{}, http.StatusBadGateway,
-				fmt.Errorf("Remote-Engine: %w", err)
-		}
-
-		return analyzeResponse{}, http.StatusInternalServerError,
-			fmt.Errorf("Analyse: %w", err)
-	}
-
-	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
-	// ob dort eine echte Engine oder der Mock gerechnet hat.
-	if rm, ok := an.(*katago.Remote); ok {
-		synthetic = rm.Synthetic()
-	}
 
 	// Effektive Werte melden: Query-Parameter (opt) überschreiben
 	// die SGF-Werte – genau wie in teaching.Analyze verwendet.
@@ -812,16 +811,75 @@ func computeAnalysis(game *board.Game, opt teaching.Options,
 		effRules = opt.Rules
 	}
 
-	return analyzeResponse{
+	resp := analyzeResponse{
 		Size:      game.Size,
 		Komi:      effKomi,
 		Rules:     effRules,
 		Moves:     len(game.Moves),
 		Synthetic: synthetic,
 		Setup:     setupStones(game),
-		Strands:   report.Strands,
-		Reports:   report.Moves,
-	}, http.StatusOK, nil
+	}
+
+	var report *teaching.GameReport
+
+	if emit == nil {
+		report, err = teaching.AnalyzeGame(game, an, opt)
+	} else {
+		// Der Kopf steht fest, sobald die Engine läuft: er geht hinaus,
+		// bevor der erste Zug gerechnet ist, damit ein Leser das Brett
+		// schon aufbauen kann.
+		for _, rec := range headRecords(resp) {
+			emit(rec)
+		}
+
+		report, err = teaching.AnalyzeStream(game, an, opt, teaching.StreamHandler{
+			Move: func(m *teaching.MoveReport) error {
+				emit(moveRecord(m))
+
+				return nil
+			},
+			Strands: func(strands []teaching.Strand) error {
+				for i := range strands {
+					emit(strandRecord(&strands[i]))
+				}
+
+				return nil
+			},
+		})
+	}
+
+	if err != nil {
+		// Der Kopf ist längst draußen; ohne diesen Satz sähe ein Leser
+		// eine Analyse, die einfach aufhört.
+		if emit != nil {
+			emit(linesRecord("E", err.Error()))
+		}
+
+		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
+		// kein internes Problem dieser Instanz.
+		if errors.Is(err, katago.ErrRemote) {
+			return analyzeResponse{}, http.StatusBadGateway,
+				fmt.Errorf("Remote-Engine: %w", err)
+		}
+
+		return analyzeResponse{}, http.StatusInternalServerError,
+			fmt.Errorf("Analyse: %w", err)
+	}
+
+	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
+	// ob dort eine echte Engine oder der Mock gerechnet hat.
+	if rm, ok := an.(*katago.Remote); ok {
+		resp.Synthetic = rm.Synthetic()
+	}
+
+	resp.Strands = report.Strands
+	resp.Reports = report.Moves
+
+	if emit != nil {
+		emit(endRecord(len(resp.Reports)))
+	}
+
+	return resp, http.StatusOK, nil
 }
 
 // computeKeepingAlive führt compute aus. Dauert die Rechnung länger als
