@@ -333,17 +333,6 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Der eigene Auftrag führt seinen Feed schon während der Rechnung
-		// mit — der Leser bekommt also den Stand von jetzt, nicht erst das
-		// Endergebnis. Ob er vollständig ist, sagt der Abschluss-Satz
-		// darin; der Client entscheidet das ohnehin selbst, weil ein
-		// abgerissener Strom für ihn genauso aussieht.
-		if wantsLines(r) {
-			serveLocalFeed(w, id)
-
-			return
-		}
-
 		reply, status, err = localJob(id)
 	}
 
@@ -388,42 +377,6 @@ func wantsLines(r *http.Request) bool {
 	return strings.EqualFold(r.URL.Query().Get("format"), "lines")
 }
 
-// serveLocalFeed liefert den Feed eines eigenen Auftrags, so weit er
-// gediehen ist.
-//
-// Solange der Kopf fehlt, steht die Engine noch: dann 202 mit der
-// bisherigen Rechenzeit im Header, damit der Leser etwas anzuzeigen hat.
-// Sobald ein Kopf da ist, geht der Feed hinaus — unvollständig ist er
-// nicht schlimmer als ein Strom, der noch läuft, und der Client liest
-// beides mit demselben Leser.
-func serveLocalFeed(w http.ResponseWriter, id string) {
-	j, ok := jobs.get(id)
-
-	if !ok {
-		httpError(w, http.StatusNotFound,
-			"Auftrag %q unbekannt (abgelaufen oder Dienst neu gestartet)", id)
-
-		return
-	}
-
-	feed, _ := jobs.feed(id)
-
-	if len(feed) == 0 {
-		w.Header().Set(elapsedHeader,
-			strconv.FormatFloat(time.Since(j.Created).Seconds(), 'f', 1, 64))
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusAccepted)
-
-		return
-	}
-
-	w.Header().Set(elapsedHeader,
-		strconv.FormatFloat(time.Since(j.Created).Seconds(), 'f', 1, 64))
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(feed)
-}
-
 // elapsedHeader trägt die bisherige Rechenzeit einer noch laufenden
 // Analyse. Ein Header, weil der Körper im Kompaktformat dann leer bleibt
 // und ein Client ohne JSON-Parser sonst nichts über den Fortschritt
@@ -441,12 +394,27 @@ const elapsedHeader = "X-Goteach-Elapsed"
 // gerechnet wird, 200 mit dem fertigen Feed. So muss der Client nichts
 // auswerten, was er nicht ohnehin schon liest.
 func writeStatusLines(w http.ResponseWriter, reply jobStatusReply) {
+	// Auf jeder Antwort, auch der letzten: unterwegs ist es der Fortschritt,
+	// am Ende die Gesamtrechenzeit — und die ist gerade dann interessant.
+	w.Header().Set(elapsedHeader,
+		strconv.FormatFloat(reply.Elapsed, 'f', 1, 64))
+
 	switch {
 	case reply.Status == jobPending || reply.Status == jobRunning:
-		w.Header().Set(elapsedHeader,
-			strconv.FormatFloat(reply.Elapsed, 'f', 1, 64))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusAccepted)
+
+		// Solange der Kopfsatz fehlt, startet die Engine noch: dann gibt es
+		// nichts zu lesen. Sobald etwas da ist, geht es hinaus — auch
+		// unvollständig, denn für den Leser sieht das aus wie ein Strom,
+		// der noch läuft, und genau dafür hat er seinen Abschluss-Satz.
+		if reply.Feed == "" {
+			w.WriteHeader(http.StatusAccepted)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, reply.Feed)
 
 	case reply.Status == jobError:
 		httpError(w, http.StatusBadGateway, "%s", reply.Error)

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/vmanke/goteach-prod/teaching"
 )
 
 // engineEnv ist die Umgebung eines Engine-Hosts (rechnet selbst, hier mit
@@ -176,6 +178,57 @@ func TestEngineJobRejectsBadParams(t *testing.T) {
 	}
 }
 
+// Eine Panic in der Rechen-Goroutine risse in Go den ganzen Prozess mit
+// allen offenen Verbindungen um — withRecover sitzt am Handler und sieht
+// eine fremde Goroutine nicht. Der Auftrag muss stattdessen als Fehler
+// enden und der Dienst weiterlaufen.
+//
+// Dass dieser Test überhaupt zurückkehrt, ist bereits die halbe Aussage:
+// ohne das recover stürbe der Testprozess hier.
+func TestAJobSurvivesAPanicInTheAnalysis(t *testing.T) {
+	store := newJobStore()
+	id := "test"
+
+	store.jobs[id] = &job{ID: id, Status: jobPending, Created: time.Now()}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		store.run(id, nil, teaching.Options{})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Auftrag kam nicht zurück")
+	}
+
+	j, ok := store.get(id)
+
+	if !ok {
+		t.Fatal("Auftrag verschwunden")
+	}
+
+	if j.Status != jobError {
+		t.Errorf("Status = %q, erwartet %q", j.Status, jobError)
+	}
+
+	if j.Err == "" {
+		t.Error("Fehlschlag ohne Begründung")
+	}
+
+	// Der Rechenplatz muss zurückgegeben sein, sonst blockiert die Panic
+	// jeden weiteren Auftrag für immer.
+	select {
+	case store.slot <- struct{}{}:
+		<-store.slot
+	default:
+		t.Error("Rechenplatz nach der Panic nicht freigegeben")
+	}
+}
+
 // Das Neue am Auftrag: sein Feed ist lesbar, WÄHREND gerechnet wird. Ohne
 // das müsste der Auftragsbetrieb zwischen Fortschrittsanzeige und
 // Wiederaufnahme wählen — hier steht, dass er das nicht muss.
@@ -188,38 +241,45 @@ func TestAJobsFeedIsReadableWhileItGrows(t *testing.T) {
 
 	store.jobs[id] = &job{ID: id, Status: jobRunning, Created: time.Now()}
 
-	if feed, ok := store.feed(id); !ok || len(feed) != 0 {
-		t.Fatalf("frischer Auftrag: feed = %q, ok = %v", feed, ok)
+	// Der Zwischenstand reist in der Antwort mit, solange kein Ergebnis da
+	// ist — das ist der Weg, den beide Betriebsarten nehmen.
+	feedOf := func() string {
+		j, ok := store.get(id)
+
+		if !ok {
+			t.Fatal("Auftrag verschwunden")
+		}
+
+		return jobReply(j).Feed
+	}
+
+	if got := feedOf(); got != "" {
+		t.Fatalf("frischer Auftrag: Feed = %q", got)
 	}
 
 	store.appendRecord(id, linesRecord("H", "19", "7.5", "Japanisch", "180", "false"))
 
-	half, ok := store.feed(id)
+	half := feedOf()
 
-	if !ok || !strings.HasPrefix(string(half), "H"+linesFieldSep) {
-		t.Fatalf("nach dem Kopfsatz: feed = %q", half)
+	if !strings.HasPrefix(half, "H"+linesFieldSep) {
+		t.Fatalf("nach dem Kopfsatz: Feed = %q", half)
 	}
 
 	store.appendRecord(id, linesRecord("M", "1", "Schwarz", "Q16"))
 
-	full, _ := store.feed(id)
-
-	if len(full) <= len(half) {
+	if full := feedOf(); len(full) <= len(half) {
 		t.Errorf("Feed wuchs nicht: %d → %d Bytes", len(half), len(full))
 	}
 
-	// Die Kopie darf sich nicht mitverändern: sonst schriebe der Handler in
-	// denselben Puffer, in den die Rechen-Goroutine gerade schreibt.
-	half = append(half, 'x')
+	// Ist der Auftrag fertig, trägt die Antwort den Report statt des
+	// Feeds — beides zu schicken verdoppelte sie.
+	store.update(id, func(j *job) {
+		j.Status = jobDone
+		j.Done = time.Now()
+	})
 
-	again, _ := store.feed(id)
-
-	if len(again) != len(full) {
-		t.Error("feed() gibt keine Kopie heraus")
-	}
-
-	if _, ok := store.feed("gibtesnicht"); ok {
-		t.Error("unbekannte ID meldet einen Feed")
+	if got := feedOf(); got != "" {
+		t.Errorf("fertiger Auftrag schickt den Feed noch mit: %q", got)
 	}
 }
 

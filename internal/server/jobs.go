@@ -253,26 +253,26 @@ func (s *jobStore) appendRecord(id, record string) {
 	})
 }
 
-// feed liefert eine Kopie des bisherigen Feeds. Eine Kopie, weil der
-// Aufrufer sie ohne Sperre schreibt, während die Rechnung weiterläuft.
-func (s *jobStore) feed(id string) ([]byte, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	j, ok := s.jobs[id]
-
-	if !ok {
-		return nil, false
-	}
-
-	return append([]byte(nil), j.Feed...), true
-}
-
 // run rechnet den Auftrag. Läuft in einer eigenen Goroutine und wartet
 // zuerst auf den freien Rechenplatz.
 func (s *jobStore) run(id string, game *board.Game, opt teaching.Options) {
 	s.slot <- struct{}{}
 	defer func() { <-s.slot }()
+
+	// Eine Panic hier risse den ganzen Serverprozess mit allen Verbindungen
+	// um: withRecover sitzt am Handler und sieht eine fremde Goroutine
+	// nicht. Der Auftrag endet dann als Fehler, der Dienst läuft weiter.
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("goteach-server: Panic im Auftrag %s: %v", id, rec)
+
+			s.update(id, func(j *job) {
+				j.Done = time.Now()
+				j.Status = jobError
+				j.Err = "interner Fehler in der Analyse"
+			})
+		}
+	}()
 
 	s.update(id, func(j *job) { j.Status = jobRunning })
 
@@ -323,6 +323,14 @@ type jobStatusReply struct {
 	Elapsed float64          `json:"elapsedSeconds"`
 	Error   string           `json:"error,omitempty"`
 	Result  *analyzeResponse `json:"result,omitempty"`
+
+	// Feed ist der Zwischenstand im Kompaktformat, solange es noch kein
+	// Ergebnis gibt. Er reist mit, weil sonst nur die rechnende Instanz
+	// ihn kennt — eine Instanz, die den Auftrag weiterreicht, könnte ihren
+	// Client sonst nicht über den Fortschritt unterrichten. Ist der Auftrag
+	// fertig, baut linesBody denselben Körper aus dem Report; ihn zusätzlich
+	// zu schicken verdoppelte die Antwort.
+	Feed string `json:"feed,omitempty"`
 }
 
 // handleEngineJobs bedient POST /engine/jobs und GET /engine/jobs?id=…
@@ -471,6 +479,11 @@ func jobReply(j job) jobStatusReply {
 
 	if j.finished() {
 		reply.Elapsed = j.Done.Sub(j.Created).Seconds()
+	} else {
+		// Die Umwandlung kopiert, und das ist hier keine Nebensache: Der
+		// Aufrufer liest ohne Sperre, während die Rechen-Goroutine weiter
+		// an den Puffer anhängt.
+		reply.Feed = string(j.Feed)
 	}
 
 	return reply
