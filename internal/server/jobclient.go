@@ -7,14 +7,19 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/teaching"
 )
 
 // jobClientTimeout deckelt Anlegen und Abfragen. Beides sind schnelle
@@ -233,6 +238,8 @@ func submitAnalyzeJob(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	w.Header().Set(jobHeader, id)
+
 	writeJSON(w, http.StatusAccepted, analyzeAcceptedReply{
 		JobID:     id,
 		Status:    jobPending,
@@ -242,19 +249,59 @@ func submitAnalyzeJob(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// handleAnalyzeStatus bedient GET /analyze/status?id=… und reicht den
-// Zustand des Auftrags durch. Der Engine-Token bleibt dabei serverseitig.
-func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
+// submitLocalAnalyzeJob nimmt den Auftrag auf dieser Instanz an und
+// antwortet sofort mit der ID — dieselbe Antwort wie beim Weiterreichen an
+// einen Engine-Host, damit ein Client die beiden Betriebsarten nicht
+// auseinanderhalten muss.
+func submitLocalAnalyzeJob(w http.ResponseWriter, r *http.Request,
+	game *board.Game, opt teaching.Options) {
+
+	id, err := startLocalJob(game, opt)
+
+	switch {
+	case errors.Is(err, errTooManyJobs):
+		httpError(w, http.StatusTooManyRequests,
+			"zu viele offene Aufträge (%d); später erneut versuchen", maxLiveJobs)
+
+		return
+
+	case err != nil:
+		httpError(w, http.StatusInternalServerError, "Auftrag anlegen: %v", err)
 
 		return
 	}
 
-	if !katagoRemoteConfigured() {
-		httpError(w, http.StatusNotFound,
-			"kein Auftragsbetrieb: diese Instanz rechnet selbst (siehe POST /analyze)")
+	statusURL := analyzeStatusPath + "?id=" + url.QueryEscape(id)
+
+	// Ohne JavaScript trägt die Statusseite das Warten, wie beim
+	// weitergereichten Auftrag auch.
+	if wantsHTML(r) {
+		http.Redirect(w, r, statusURL, http.StatusSeeOther)
+
+		return
+	}
+
+	w.Header().Set(jobHeader, id)
+
+	writeJSON(w, http.StatusAccepted, analyzeAcceptedReply{
+		JobID:     id,
+		Status:    jobPending,
+		StatusURL: statusURL,
+		Hint: "Analyse läuft. Status unter statusUrl abfragen; eine " +
+			"vollständige Partie dauert Minuten. Der Auftrag liegt im " +
+			"Speicher dieser Instanz: ein Neustart oder eine halbe Stunde " +
+			"ohne Abholung, und er ist fort.",
+	})
+}
+
+// handleAnalyzeStatus bedient GET /analyze/status?id=… und reicht den
+// Zustand des Auftrags durch — vom Engine-Host, wenn dorthin delegiert
+// wird, sonst aus dem eigenen Register. Der Engine-Token bleibt dabei
+// serverseitig.
+func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
 
 		return
 	}
@@ -267,7 +314,27 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply, status, err := fetchJob(id)
+	var (
+		reply  jobStatusReply
+		status int
+		err    error
+	)
+
+	if katagoRemoteConfigured() {
+		reply, status, err = fetchJob(id)
+	} else {
+		// Der Auftrag liegt hier. Gehört er zu einer anderen Fly-Maschine,
+		// muss die Anfrage dorthin — sonst liefe sie in ein 404, sobald
+		// mehr als eine Maschine läuft.
+		if target := replayTarget(id); target != "" {
+			w.Header().Set("fly-replay", "instance="+target)
+			w.WriteHeader(http.StatusConflict)
+
+			return
+		}
+
+		reply, status, err = localJob(id)
+	}
 
 	if err != nil {
 		if wantsHTML(r) {
@@ -282,6 +349,15 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Kompaktformat vor allem anderen: der Client, der es anfordert, hat
+	// bewusst keinen JSON-Parser, und ein Accept-Header entscheidet das
+	// nicht so eindeutig wie ein ausdrücklicher Parameter.
+	if wantsLines(r) {
+		writeStatusLines(w, reply)
+
+		return
+	}
+
 	if wantsHTML(r) {
 		writeStatusPage(w, reply)
 
@@ -289,6 +365,69 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, reply)
+}
+
+// jobHeader trägt die Auftrags-ID neben dem JSON-Körper. Derselbe Grund
+// wie bei elapsedHeader: Der Client, für den der Auftragsbetrieb gebaut
+// ist, kann den Körper nicht lesen.
+const jobHeader = "X-Goteach-Job"
+
+// wantsLines meldet, ob der Aufrufer das Kompaktformat verlangt.
+func wantsLines(r *http.Request) bool {
+	return strings.EqualFold(r.URL.Query().Get("format"), "lines")
+}
+
+// elapsedHeader trägt die bisherige Rechenzeit einer noch laufenden
+// Analyse. Ein Header, weil der Körper im Kompaktformat dann leer bleibt
+// und ein Client ohne JSON-Parser sonst nichts über den Fortschritt
+// erführe.
+const elapsedHeader = "X-Goteach-Elapsed"
+
+// writeStatusLines beantwortet die Statusabfrage im Kompaktformat.
+//
+// Der wasm-Client der Vereinsseite hat keinen JSON-Parser — das
+// lines-Format existiert genau deshalb. Ohne diesen Weg nützte ihm der
+// Auftragsbetrieb nichts: Er bekäme eine Auftrags-ID und könnte das
+// Ergebnis dahinter nicht lesen.
+//
+// Der Zustand steckt im Statuscode, nicht im Körper: 202 solange
+// gerechnet wird, 200 mit dem fertigen Feed. So muss der Client nichts
+// auswerten, was er nicht ohnehin schon liest.
+func writeStatusLines(w http.ResponseWriter, reply jobStatusReply) {
+	// Auf jeder Antwort, auch der letzten: unterwegs ist es der Fortschritt,
+	// am Ende die Gesamtrechenzeit — und die ist gerade dann interessant.
+	w.Header().Set(elapsedHeader,
+		strconv.FormatFloat(reply.Elapsed, 'f', 1, 64))
+
+	switch {
+	case reply.Status == jobPending || reply.Status == jobRunning:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+		// Solange der Kopfsatz fehlt, startet die Engine noch: dann gibt es
+		// nichts zu lesen. Sobald etwas da ist, geht es hinaus — auch
+		// unvollständig, denn für den Leser sieht das aus wie ein Strom,
+		// der noch läuft, und genau dafür hat er seinen Abschluss-Satz.
+		if reply.Feed == "" {
+			w.WriteHeader(http.StatusAccepted)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, reply.Feed)
+
+	case reply.Status == jobError:
+		httpError(w, http.StatusBadGateway, "%s", reply.Error)
+
+	case reply.Result == nil:
+		httpError(w, http.StatusBadGateway,
+			"Auftrag meldet sich fertig, liefert aber keinen Report")
+
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, linesBody(*reply.Result))
+	}
 }
 
 // writeStatusPage rendert den Auftragszustand als schlichte Seite.

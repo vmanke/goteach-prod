@@ -1164,6 +1164,17 @@ func TestCORSAllowsTheClubSiteOnly(t *testing.T) {
 		t.Error("Vary: Origin fehlt")
 	}
 
+	// Ohne diese Freigabe sieht ein Browser von fremder Herkunft nur die
+	// sechs Standard-Header — und der Client liest Auftrags-ID und
+	// Rechenzeit genau dort, weil sein Bündel keinen JSON-Parser trägt.
+	expose := rr.Header().Get("Access-Control-Expose-Headers")
+
+	for _, name := range []string{jobHeader, elapsedHeader} {
+		if !strings.Contains(expose, name) {
+			t.Errorf("Expose-Headers = %q, %s fehlt", expose, name)
+		}
+	}
+
 	// Fremder Absender: keine CORS-Freigabe.
 	req = httptest.NewRequest(http.MethodPost, "/analyze",
 		strings.NewReader(demoSGF))
@@ -1235,6 +1246,147 @@ func TestCORSRefusesAnUnanchoredWildcard(t *testing.T) {
 		if list.permits(origin) {
 			t.Errorf("permits(%q) = true, erwartet keine Freigabe", origin)
 		}
+	}
+}
+
+// Der Auftragsbetrieb auf einer selbst rechnenden Instanz: /analyze nimmt
+// auf Wunsch an, statt die Verbindung minutenlang zu halten, und
+// /analyze/status liefert denselben Auftrag aus dem eigenen Register.
+func TestAnalyzeAsALocalJob(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/analyze?mode=job",
+		strings.NewReader(demoSGF))
+
+	rr := serve(t, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("Status = %d, erwartet 202 — Body: %s", rr.Code, rr.Body.String())
+	}
+
+	var accepted analyzeAcceptedReply
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("Antwort kein JSON: %v — Body: %s", err, rr.Body.String())
+	}
+
+	if accepted.JobID == "" {
+		t.Fatal("keine Auftrags-ID")
+	}
+
+	// Dieselbe ID im Header: der Client, für den das gebaut ist, kann den
+	// JSON-Körper nicht lesen.
+	if got := rr.Header().Get(jobHeader); got != accepted.JobID {
+		t.Errorf("%s = %q, erwartet %q", jobHeader, got, accepted.JobID)
+	}
+
+	if !strings.HasPrefix(accepted.StatusURL, analyzeStatusPath) {
+		t.Errorf("statusUrl = %q, erwartet unter %s",
+			accepted.StatusURL, analyzeStatusPath)
+	}
+
+	// Der Auftrag rechnet in einer eigenen Goroutine; abgefragt wird mit
+	// Backoff, wie ein Client es auch täte.
+	var reply jobStatusReply
+
+	for range 100 {
+		status := serve(t, httptest.NewRequest(http.MethodGet,
+			accepted.StatusURL, nil))
+
+		if status.Code != http.StatusOK {
+			t.Fatalf("Status-Abfrage = %d — Body: %s",
+				status.Code, status.Body.String())
+		}
+
+		if err := json.Unmarshal(status.Body.Bytes(), &reply); err != nil {
+			t.Fatalf("Status-Antwort kein JSON: %v", err)
+		}
+
+		if reply.Status == jobDone || reply.Status == jobError {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if reply.Status != jobDone {
+		t.Fatalf("Auftrag endete als %q (%s)", reply.Status, reply.Error)
+	}
+
+	if reply.Result == nil || len(reply.Result.Reports) != 10 {
+		t.Fatalf("Ergebnis = %+v, erwartet 10 Reports", reply.Result)
+	}
+}
+
+// Der Weg, den der wasm-Client geht: Auftrag anlegen, im Kompaktformat
+// abholen. Er hat keinen JSON-Parser — der Zustand muss deshalb im
+// Statuscode stehen und das Ergebnis im lines-Format.
+func TestAnalyzeJobStatusInLinesFormat(t *testing.T) {
+	rr := serve(t, httptest.NewRequest(http.MethodPost, "/analyze?mode=job",
+		strings.NewReader(demoSGF)))
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("Status = %d, erwartet 202", rr.Code)
+	}
+
+	var accepted analyzeAcceptedReply
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("Antwort kein JSON: %v", err)
+	}
+
+	url := accepted.StatusURL + "&format=lines"
+
+	var body string
+
+	// Abgefragt wird, bis der Abschluss-Satz da ist — nicht bis zur ersten
+	// 200. Der Feed kommt absichtlich schon unvollständig heraus, und ein
+	// Test, der die erste Antwort für das Ende hielte, wäre nur zufällig
+	// grün.
+	for range 200 {
+		status := serve(t, httptest.NewRequest(http.MethodGet, url, nil))
+
+		if status.Header().Get(elapsedHeader) == "" {
+			t.Errorf("Antwort ohne %s — der Client hätte nichts anzuzeigen",
+				elapsedHeader)
+		}
+
+		switch status.Code {
+		case http.StatusAccepted:
+			// Vor dem Kopfsatz gibt es nichts zu lesen: die Engine startet
+			// noch.
+			if status.Body.Len() != 0 {
+				t.Errorf("202 mit Körper: %q", status.Body.String())
+			}
+
+		case http.StatusOK:
+			body = status.Body.String()
+
+		default:
+			t.Fatalf("Status = %d — Body: %s", status.Code, status.Body.String())
+		}
+
+		if strings.Contains(body, linesRecordSep+"Z"+linesFieldSep) {
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if body == "" {
+		t.Fatal("Auftrag wurde nicht fertig")
+	}
+
+	// Derselbe Körper, den der synchrone Weg mit format=lines liefert —
+	// der Client liest ihn mit demselben Leser.
+	if !strings.HasPrefix(body, "H"+linesFieldSep) {
+		t.Errorf("kein Kopfsatz am Anfang: %.40q", body)
+	}
+
+	if got := strings.Count(body, linesRecordSep+"M"+linesFieldSep); got != 10 {
+		t.Errorf("M-Sätze = %d, erwartet 10", got)
+	}
+
+	if !strings.Contains(body, linesRecordSep+"Z"+linesFieldSep) {
+		t.Error("kein Abschluss-Satz — der Client hielte den Feed für abgeschnitten")
 	}
 }
 

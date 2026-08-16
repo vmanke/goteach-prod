@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/vmanke/goteach-prod/teaching"
 )
 
 // engineEnv ist die Umgebung eines Engine-Hosts (rechnet selbst, hier mit
@@ -176,15 +178,136 @@ func TestEngineJobRejectsBadParams(t *testing.T) {
 	}
 }
 
-// Ohne Engine-Host gibt es keinen Auftragsbetrieb: /analyze rechnet
-// weiterhin selbst und /analyze/status existiert nicht. Das ist der
+// Eine Panic in der Rechen-Goroutine risse in Go den ganzen Prozess mit
+// allen offenen Verbindungen um — withRecover sitzt am Handler und sieht
+// eine fremde Goroutine nicht. Der Auftrag muss stattdessen als Fehler
+// enden und der Dienst weiterlaufen.
+//
+// Dass dieser Test überhaupt zurückkehrt, ist bereits die halbe Aussage:
+// ohne das recover stürbe der Testprozess hier.
+func TestAJobSurvivesAPanicInTheAnalysis(t *testing.T) {
+	store := newJobStore()
+	id := "test"
+
+	store.jobs[id] = &job{ID: id, Status: jobPending, Created: time.Now()}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		store.run(id, nil, teaching.Options{})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Auftrag kam nicht zurück")
+	}
+
+	j, ok := store.get(id)
+
+	if !ok {
+		t.Fatal("Auftrag verschwunden")
+	}
+
+	if j.Status != jobError {
+		t.Errorf("Status = %q, erwartet %q", j.Status, jobError)
+	}
+
+	if j.Err == "" {
+		t.Error("Fehlschlag ohne Begründung")
+	}
+
+	// Der Rechenplatz muss zurückgegeben sein, sonst blockiert die Panic
+	// jeden weiteren Auftrag für immer.
+	select {
+	case store.slot <- struct{}{}:
+		<-store.slot
+	default:
+		t.Error("Rechenplatz nach der Panic nicht freigegeben")
+	}
+}
+
+// Das Neue am Auftrag: sein Feed ist lesbar, WÄHREND gerechnet wird. Ohne
+// das müsste der Auftragsbetrieb zwischen Fortschrittsanzeige und
+// Wiederaufnahme wählen — hier steht, dass er das nicht muss.
+//
+// Am Register statt über HTTP, weil die Mock-Engine zu schnell ist, um
+// einen Zwischenstand verlässlich zu treffen.
+func TestAJobsFeedIsReadableWhileItGrows(t *testing.T) {
+	store := newJobStore()
+	id := "test"
+
+	store.jobs[id] = &job{ID: id, Status: jobRunning, Created: time.Now()}
+
+	// Der Zwischenstand reist in der Antwort mit, solange kein Ergebnis da
+	// ist — das ist der Weg, den beide Betriebsarten nehmen.
+	feedOf := func() string {
+		j, ok := store.get(id)
+
+		if !ok {
+			t.Fatal("Auftrag verschwunden")
+		}
+
+		return jobReply(j).Feed
+	}
+
+	if got := feedOf(); got != "" {
+		t.Fatalf("frischer Auftrag: Feed = %q", got)
+	}
+
+	store.appendRecord(id, linesRecord("H", "19", "7.5", "Japanisch", "180", "false"))
+
+	half := feedOf()
+
+	if !strings.HasPrefix(half, "H"+linesFieldSep) {
+		t.Fatalf("nach dem Kopfsatz: Feed = %q", half)
+	}
+
+	store.appendRecord(id, linesRecord("M", "1", "Schwarz", "Q16"))
+
+	if full := feedOf(); len(full) <= len(half) {
+		t.Errorf("Feed wuchs nicht: %d → %d Bytes", len(half), len(full))
+	}
+
+	// Ist der Auftrag fertig, trägt die Antwort den Report statt des
+	// Feeds — beides zu schicken verdoppelte sie.
+	store.update(id, func(j *job) {
+		j.Status = jobDone
+		j.Done = time.Now()
+	})
+
+	if got := feedOf(); got != "" {
+		t.Errorf("fertiger Auftrag schickt den Feed noch mit: %q", got)
+	}
+}
+
+// Ohne Engine-Host bleibt /analyze synchron — das ist der
 // Regressionsschutz für lokale Nutzung, CLI und Mock.
-func TestAnalyzeStatusWithoutRemote(t *testing.T) {
+//
+// Die Statusroute gibt es dort inzwischen trotzdem: Sie bedient die
+// Aufträge, die diese Instanz auf Wunsch (mode=job) selbst annimmt. Eine
+// unbekannte ID ist deshalb weiterhin 404, aber aus einem anderen Grund
+// als früher — nicht "die Route existiert hier nicht", sondern "diesen
+// Auftrag kennt niemand". Der Test hält beides auseinander.
+func TestAnalyzeWithoutRemoteStaysSynchronous(t *testing.T) {
+	rr := serveEnv(t, httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF)), map[string]string{})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, erwartet 200 (synchron)", rr.Code)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/analyze/status?id=egal", nil)
-	rr := serveEnv(t, req, map[string]string{})
+	rr = serveEnv(t, req, map[string]string{})
 
 	if rr.Code != http.StatusNotFound {
-		t.Fatalf("Status = %d, erwartet 404", rr.Code)
+		t.Fatalf("unbekannte ID: Status = %d, erwartet 404", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), "unbekannt") {
+		t.Errorf("404 ohne Grund im Body: %s", rr.Body.String())
 	}
 }
 

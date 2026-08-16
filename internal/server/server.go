@@ -240,6 +240,14 @@ func withCORS(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 
+			// Ohne diese Freigabe sieht ein Browser von einer fremden
+			// Herkunft nur die sechs Standard-Header. Der Client, für den
+			// der Auftragsbetrieb gebaut ist, liest Auftrags-ID und
+			// Rechenzeit aber genau hier: sein Bündel trägt keinen
+			// JSON-Parser, mit dem er sie aus dem Körper holen könnte.
+			h.Set("Access-Control-Expose-Headers",
+				jobHeader+", "+elapsedHeader)
+
 			// Preflight endet hier: der Browser fragt nach, ob POST mit
 			// Content-Type erlaubt ist, und braucht dafür keinen Body.
 			if r.Method == http.MethodOptions {
@@ -321,12 +329,15 @@ func serveInfo(w http.ResponseWriter) {
 	// auf älterem Code schlicht — genau das macht Versionsversatz
 	// zwischen Client- und Engine-Instanz mit einem Blick sichtbar.
 	mode := "synchron"
-	status := "entfällt (diese Instanz rechnet selbst)"
 
 	if katagoRemoteConfigured() {
 		mode = "auftrag"
-		status = "GET " + analyzeStatusPath + "?id=… (Auftrag abfragen)"
 	}
+
+	// Die Statusroute gibt es in beiden Betriebsarten: im Auftragsbetrieb
+	// für den weitergereichten Auftrag, sonst für den, den diese Instanz
+	// auf Wunsch (mode=job) selbst angenommen hat.
+	status := "GET " + analyzeStatusPath + "?id=… (Auftrag abfragen)"
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":    "goteach",
@@ -340,7 +351,9 @@ func serveInfo(w http.ResponseWriter) {
 		"analyze": "POST /analyze mit SGF (roh, Formularfeld oder Datei-Upload \"sgf\") " +
 			"oder ogs=<URL|ID> (online-go.com); Parameter: visits, tau, from, to, " +
 			"rules, komi; download=1 für Datei-Download; bei aktiver Auth mit " +
-			"Authorization: Bearer <Token>; im Auftragsbetrieb 202 mit Auftrags-ID",
+			"Authorization: Bearer <Token>; im Auftragsbetrieb 202 mit Auftrags-ID; " +
+			"mode=job erzwingt den Auftragsbetrieb auch auf einer selbst " +
+			"rechnenden Instanz (Auftrag im Speicher, 30 Minuten)",
 		"status":  status,
 		"warnung": "ohne konfigurierte KataGo-Engine sind alle Werte synthetisch (Mock)",
 		"healthz": "GET /healthz",
@@ -457,6 +470,17 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	// diese Instanz also weiterhin sofort, nicht erst nach dem Polling.
 	if katagoRemoteConfigured() {
 		submitAnalyzeJob(w, r, string(data), get)
+
+		return
+	}
+
+	// Auch die rechnende Instanz kann den Auftrag entgegennehmen, statt die
+	// Verbindung minutenlang offen zu halten — aber nur, wenn der Aufrufer
+	// es verlangt. Als Voreinstellung wäre es eine stille Änderung der
+	// Antwort für jeden bestehenden Aufrufer; als Wunsch ist es eine
+	// Zusage, die nur bekommt, wer sie einzulösen weiß.
+	if strings.EqualFold(get("mode"), "job") {
+		submitLocalAnalyzeJob(w, r, game, opt)
 
 		return
 	}
@@ -749,6 +773,25 @@ func sanitizeFloats(v reflect.Value) {
 func computeAnalysis(game *board.Game, opt teaching.Options,
 	start func() (katago.Analyzer, bool, error)) (analyzeResponse, int, error) {
 
+	return computeAnalysisEmitting(game, opt, start, nil)
+}
+
+// computeAnalysisEmitting ist dieselbe Rechnung, gibt aber jeden fertigen
+// Satz des Kompaktformats sofort an emit weiter: Kopf und Vorgabesteine,
+// sobald die Engine steht, danach jeden Zug und jeden Erzählstrang, zum
+// Schluss den Abschluss-Satz.
+//
+// Wer beides braucht, bekommt beides aus EINER Rechnung — den fertigen
+// Report für JSON und die No-JS-Seite, und den wachsenden Feed für einen
+// Leser, der schon während der Rechnung etwas sehen will. Der
+// Auftragsbetrieb ist genau dieser Fall: ohne das müsste er sich zwischen
+// Fortschritt und Wiederaufnahme entscheiden.
+//
+// emit darf nil sein; dann ist dies wörtlich der bisherige Weg.
+func computeAnalysisEmitting(game *board.Game, opt teaching.Options,
+	start func() (katago.Analyzer, bool, error),
+	emit func(string)) (analyzeResponse, int, error) {
+
 	an, synthetic, err := start()
 
 	if err != nil {
@@ -761,26 +804,6 @@ func computeAnalysis(game *board.Game, opt teaching.Options,
 			log.Printf("goteach-server: Analyzer schließen: %v", err)
 		}
 	}()
-
-	report, err := teaching.AnalyzeGame(game, an, opt)
-
-	if err != nil {
-		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
-		// kein internes Problem dieser Instanz.
-		if errors.Is(err, katago.ErrRemote) {
-			return analyzeResponse{}, http.StatusBadGateway,
-				fmt.Errorf("Remote-Engine: %w", err)
-		}
-
-		return analyzeResponse{}, http.StatusInternalServerError,
-			fmt.Errorf("Analyse: %w", err)
-	}
-
-	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
-	// ob dort eine echte Engine oder der Mock gerechnet hat.
-	if rm, ok := an.(*katago.Remote); ok {
-		synthetic = rm.Synthetic()
-	}
 
 	// Effektive Werte melden: Query-Parameter (opt) überschreiben
 	// die SGF-Werte – genau wie in teaching.Analyze verwendet.
@@ -796,16 +819,75 @@ func computeAnalysis(game *board.Game, opt teaching.Options,
 		effRules = opt.Rules
 	}
 
-	return analyzeResponse{
+	resp := analyzeResponse{
 		Size:      game.Size,
 		Komi:      effKomi,
 		Rules:     effRules,
 		Moves:     len(game.Moves),
 		Synthetic: synthetic,
 		Setup:     setupStones(game),
-		Strands:   report.Strands,
-		Reports:   report.Moves,
-	}, http.StatusOK, nil
+	}
+
+	var report *teaching.GameReport
+
+	if emit == nil {
+		report, err = teaching.AnalyzeGame(game, an, opt)
+	} else {
+		// Der Kopf steht fest, sobald die Engine läuft: er geht hinaus,
+		// bevor der erste Zug gerechnet ist, damit ein Leser das Brett
+		// schon aufbauen kann.
+		for _, rec := range headRecords(resp) {
+			emit(rec)
+		}
+
+		report, err = teaching.AnalyzeStream(game, an, opt, teaching.StreamHandler{
+			Move: func(m *teaching.MoveReport) error {
+				emit(moveRecord(m))
+
+				return nil
+			},
+			Strands: func(strands []teaching.Strand) error {
+				for i := range strands {
+					emit(strandRecord(&strands[i]))
+				}
+
+				return nil
+			},
+		})
+	}
+
+	if err != nil {
+		// Der Kopf ist längst draußen; ohne diesen Satz sähe ein Leser
+		// eine Analyse, die einfach aufhört.
+		if emit != nil {
+			emit(linesRecord("E", err.Error()))
+		}
+
+		// Fehler des entfernten Engine-Hosts sind Gateway-Fehler,
+		// kein internes Problem dieser Instanz.
+		if errors.Is(err, katago.ErrRemote) {
+			return analyzeResponse{}, http.StatusBadGateway,
+				fmt.Errorf("Remote-Engine: %w", err)
+		}
+
+		return analyzeResponse{}, http.StatusInternalServerError,
+			fmt.Errorf("Analyse: %w", err)
+	}
+
+	// Beim Remote-Analyzer weiß erst die Antwort des Engine-Hosts,
+	// ob dort eine echte Engine oder der Mock gerechnet hat.
+	if rm, ok := an.(*katago.Remote); ok {
+		resp.Synthetic = rm.Synthetic()
+	}
+
+	resp.Strands = report.Strands
+	resp.Reports = report.Moves
+
+	if emit != nil {
+		emit(endRecord(len(resp.Reports)))
+	}
+
+	return resp, http.StatusOK, nil
 }
 
 // computeKeepingAlive führt compute aus. Dauert die Rechnung länger als

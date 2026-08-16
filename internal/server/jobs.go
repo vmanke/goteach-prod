@@ -21,6 +21,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -69,6 +71,16 @@ type job struct {
 	Result  *analyzeResponse
 	Created time.Time
 	Done    time.Time
+
+	// Feed ist derselbe Körper, den der synchrone Weg mit format=lines
+	// schickt — aber schon während der Rechnung, Satz für Satz.
+	//
+	// Ohne ihn müsste der Auftragsbetrieb zwischen zwei Übeln wählen:
+	// entweder der Leser sieht minutenlang nichts, oder er hängt an einer
+	// Verbindung, deren Abriss die ganze Rechnung kostet. Mit ihm sieht er
+	// jeden Zug, sobald er fertig ist, und ein Neuladen setzt dort auf,
+	// wo er war.
+	Feed []byte
 }
 
 // jobStore hält die Aufträge im Speicher.
@@ -231,17 +243,47 @@ func (s *jobStore) update(id string, fn func(*job)) {
 	}
 }
 
+// appendRecord hängt einen fertigen Satz an den Feed des Auftrags. Unter
+// derselben Sperre wie alles andere: geschrieben wird aus der Rechen-
+// Goroutine, gelesen aus dem Handler.
+func (s *jobStore) appendRecord(id, record string) {
+	s.update(id, func(j *job) {
+		j.Feed = append(j.Feed, record...)
+		j.Feed = append(j.Feed, linesRecordSep...)
+	})
+}
+
 // run rechnet den Auftrag. Läuft in einer eigenen Goroutine und wartet
 // zuerst auf den freien Rechenplatz.
 func (s *jobStore) run(id string, game *board.Game, opt teaching.Options) {
 	s.slot <- struct{}{}
 	defer func() { <-s.slot }()
 
+	// Eine Panic hier risse den ganzen Serverprozess mit allen Verbindungen
+	// um: withRecover sitzt am Handler und sieht eine fremde Goroutine
+	// nicht. Der Auftrag endet dann als Fehler, der Dienst läuft weiter.
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("goteach-server: Panic im Auftrag %s: %v", id, rec)
+
+			s.update(id, func(j *job) {
+				j.Done = time.Now()
+				j.Status = jobError
+				j.Err = "interner Fehler in der Analyse"
+			})
+		}
+	}()
+
 	s.update(id, func(j *job) { j.Status = jobRunning })
 
 	// Immer die LOKALE Engine (oder der Mock) — nie katago.Remote, sonst
 	// reichen sich zwei Instanzen die Arbeit im Kreis weiter.
-	resp, _, err := computeAnalysis(game, opt, startLocalAnalyzer)
+	//
+	// Jeder fertige Satz geht sofort in den Feed des Auftrags: Der Leser
+	// sieht die Züge einzeln kommen, ohne an der Verbindung zu hängen,
+	// über die er sie abholt.
+	resp, _, err := computeAnalysisEmitting(game, opt, startLocalAnalyzer,
+		func(record string) { s.appendRecord(id, record) })
 
 	s.update(id, func(j *job) {
 		j.Done = time.Now()
@@ -281,6 +323,14 @@ type jobStatusReply struct {
 	Elapsed float64          `json:"elapsedSeconds"`
 	Error   string           `json:"error,omitempty"`
 	Result  *analyzeResponse `json:"result,omitempty"`
+
+	// Feed ist der Zwischenstand im Kompaktformat, solange es noch kein
+	// Ergebnis gibt. Er reist mit, weil sonst nur die rechnende Instanz
+	// ihn kennt — eine Instanz, die den Auftrag weiterreicht, könnte ihren
+	// Client sonst nicht über den Fortschritt unterrichten. Ist der Auftrag
+	// fertig, baut linesBody denselben Körper aus dem Report; ihn zusätzlich
+	// zu schicken verdoppelte die Antwort.
+	Feed string `json:"feed,omitempty"`
 }
 
 // handleEngineJobs bedient POST /engine/jobs und GET /engine/jobs?id=…
@@ -410,6 +460,15 @@ func readJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reply := jobReply(j)
+
+	writeJSON(w, http.StatusOK, reply)
+}
+
+// jobReply macht aus einem Auftrag die Antwort. An einer Stelle, weil zwei
+// Wege sie brauchen: /engine/jobs für die aufrufende Instanz und
+// /analyze/status für den Browser, wenn diese Instanz selbst rechnet.
+func jobReply(j job) jobStatusReply {
 	reply := jobStatusReply{
 		ID:      j.ID,
 		Status:  j.Status,
@@ -418,9 +477,55 @@ func readJob(w http.ResponseWriter, r *http.Request) {
 		Elapsed: time.Since(j.Created).Seconds(),
 	}
 
-	if j.Status == jobDone || j.Status == jobError {
+	if j.finished() {
 		reply.Elapsed = j.Done.Sub(j.Created).Seconds()
+	} else {
+		// Die Umwandlung kopiert, und das ist hier keine Nebensache: Der
+		// Aufrufer liest ohne Sperre, während die Rechen-Goroutine weiter
+		// an den Puffer anhängt.
+		reply.Feed = string(j.Feed)
 	}
 
-	writeJSON(w, http.StatusOK, reply)
+	return reply
+}
+
+// errTooManyJobs trennt die volle Warteschlange von echten Fehlern: sie
+// verdient 429 und den Hinweis, es später erneut zu versuchen.
+var errTooManyJobs = errors.New("zu viele offene Aufträge")
+
+// startLocalJob nimmt eine bereits geprüfte Partie als Auftrag an und
+// rechnet sie auf DIESER Instanz.
+//
+// Den Auftragsbetrieb gab es bisher nur zwischen zwei Instanzen — eine
+// ohne Engine, die an einen Engine-Host weiterreicht. Für den Browser
+// zählt aber dieselbe Not: eine volle Partie dauert Minuten, und eine
+// Verbindung, die so lange offen bleiben muss, reißt irgendwann. Der
+// Auftrag löst die Antwort vom Warten ab; der Browser merkt sich die ID
+// und fragt nach, auch nach einem Neuladen.
+func startLocalJob(game *board.Game, opt teaching.Options) (string, error) {
+	id, err := newJobID()
+
+	if err != nil {
+		return "", fmt.Errorf("ID erzeugen: %w", err)
+	}
+
+	if !jobs.add(&job{ID: id, Status: jobPending, Created: time.Now()}) {
+		return "", errTooManyJobs
+	}
+
+	go jobs.run(id, game, opt)
+
+	return id, nil
+}
+
+// localJob liefert den Zustand eines Auftrags dieser Instanz.
+func localJob(id string) (jobStatusReply, int, error) {
+	j, ok := jobs.get(id)
+
+	if !ok {
+		return jobStatusReply{}, http.StatusNotFound, fmt.Errorf(
+			"Auftrag %q unbekannt (abgelaufen oder Dienst neu gestartet)", id)
+	}
+
+	return jobReply(j), http.StatusOK, nil
 }
