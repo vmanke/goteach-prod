@@ -158,12 +158,16 @@ func handleSitemap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	base := xmlEscape.Replace(baseURL(r))
+
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>%s/</loc></url>
+  <url><loc>%[1]s/</loc></url>
+  <url><loc>%[1]s/aushang</loc></url>
+  <url><loc>%[1]s/partie</loc></url>
 </urlset>
-`, xmlEscape.Replace(baseURL(r)))
+`, base)
 }
 
 // allowGetHead lässt nur GET/HEAD durch; sonst 405 mit Allow-Header.

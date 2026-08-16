@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partie 13×13 — Verlauf und Schauplätze</title>
+<style>
+  :root {
+    --paper:      #d9dcd6;
+    --card:       #eff1ec;
+    --ink:        #1a1f1d;
+    --ink-soft:   #5c645f;
+    --rule:       #b6bcb4;
+
+    --wood:       #c9ae84;
+    --wood-line:  #6b5539;
+    --stone-b:    #16191a;
+    --stone-w:    #f6f4ee;
+    --stone-w-ed: #9a9a91;
+
+    --s0: #3f7a63;
+    --s1: #7e9a4e;
+    --s2: #c9a227;
+    --s3: #c05a2b;
+    --s4: #8e2318;
+
+    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 20px 16px 56px;
+  }
+
+  /* ---------- Kopf ---------- */
+
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 10px;
+    margin-bottom: 18px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 6px;
+  }
+
+  .masthead h1 {
+    font-family: var(--mono);
+    font-size: 26px;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+
+  .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  /* ---------- Brett ---------- */
+
+  .board-frame {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    padding: 10px;
+    margin-bottom: 14px;
+  }
+
+  #board { display: block; width: 100%; height: auto; }
+
+  /* ---------- Transport ---------- */
+
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .transport button {
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1;
+    padding: 12px 14px;
+    min-width: 48px;
+    background: var(--card);
+    color: var(--ink);
+    border: 1px solid var(--ink);
+    cursor: pointer;
+  }
+
+  .transport button:hover { background: var(--ink); color: var(--card); }
+  .transport button:focus-visible { outline: 3px solid var(--s2); outline-offset: 2px; }
+
+  .counter {
+    font-family: var(--mono);
+    font-size: 13px;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    margin: 0 0 14px;
+    accent-color: var(--ink);
+  }
+
+  input[type="range"]:focus-visible { outline: 3px solid var(--s2); outline-offset: 4px; }
+
+  /* ---------- Zugkarte ---------- */
+
+  .movecard {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 5px solid var(--rule);
+    padding: 12px 14px;
+    margin-bottom: 20px;
+    min-height: 122px;
+  }
+
+  .movecard .line1 {
+    font-family: var(--mono);
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+  }
+
+  .movecard .line2 {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 0 0 10px;
+  }
+
+  .movecard dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .movecard dt {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    align-self: center;
+  }
+
+  .movecard dd { margin: 0; font-family: var(--mono); font-size: 13px; }
+
+  /* ---------- Verlaufsstreifen ---------- */
+
+  .section-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    border-top: 1px solid var(--rule);
+    padding-top: 8px;
+    margin: 0 0 8px;
+  }
+
+  .strip-frame {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    padding: 8px 6px 4px;
+    margin-bottom: 8px;
+    touch-action: pan-y;
+  }
+
+  #strip { display: block; width: 100%; height: auto; cursor: crosshair; }
+
+  .caption {
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    margin: 0 0 22px;
+  }
+
+  /* ---------- Sprungmarken ---------- */
+
+  .jumps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; }
+
+  .jumps button {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 8px 10px;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    cursor: pointer;
+  }
+
+  .jumps button:hover { border-color: var(--ink); background: var(--card); }
+  .jumps button:focus-visible { outline: 3px solid var(--s2); outline-offset: 2px; }
+
+  /* ---------- Schauplätze ---------- */
+
+  .venue {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    gap: 0 10px;
+    align-items: baseline;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    padding: 9px 2px;
+    cursor: pointer;
+    color: inherit;
+  }
+
+  .venue:hover { background: var(--card); }
+  .venue:focus-visible { outline: 3px solid var(--s2); outline-offset: -3px; }
+  .venue[aria-current="true"] { background: var(--card); }
+
+  .venue .swatch { width: 12px; height: 12px; align-self: center; }
+  .venue .name { font-size: 13.5px; line-height: 1.3; }
+  .venue[aria-current="true"] .name { font-weight: 600; }
+
+  .venue .figs {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+
+  .venue .span {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+
+  /* ---------- Schalter ---------- */
+
+  .switches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 16px 0 24px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+
+  .switches label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .switches input { width: 16px; height: 16px; accent-color: var(--ink); }
+
+  .foot {
+    border-top: 1px solid var(--rule);
+    padding-top: 10px;
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- Weg zur eigenen Analyse ---------- */
+
+  .cta {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 5px solid var(--s0);
+    padding: 12px 14px;
+    margin: 0 0 22px;
+  }
+
+  .cta p { margin: 0; font-size: 13px; line-height: 1.55; }
+  .cta p + p { margin-top: 6px; color: var(--ink-soft); }
+
+  a { color: var(--ink); text-underline-offset: 2px; }
+  a:hover { color: var(--s0); }
+  a:focus-visible { outline: 3px solid var(--s2); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">FlascheLeer Berlin — Partieanalyse</p>
+    <h1>13×13, 126 Züge</h1>
+    <p class="meta">
+      Komi 2.5, japanische Zählung, KataGo über goteach<br>
+      Punktverlust laut Bericht: Schwarz 104.8 / Weiß 101.8 · 17 geschlagene Steine
+    </p>
+  </header>
+
+  <div class="board-frame">
+    <svg id="board" viewBox="0 0 520 520" role="img" aria-label="Spielbrett, aktueller Stand"></svg>
+  </div>
+
+  <div class="transport">
+    <button id="btnStart" title="Zum Anfang" aria-label="Zum Anfang">|◀</button>
+    <button id="btnPrev" title="Zug zurück" aria-label="Zug zurück">◀</button>
+    <button id="btnPlay" title="Abspielen" aria-label="Abspielen">▶</button>
+    <button id="btnNext" title="Zug vor" aria-label="Zug vor">▶|</button>
+    <span class="counter" id="counter">0 / 126</span>
+  </div>
+
+  <input type="range" id="scrub" min="0" max="126" value="0" step="1" aria-label="Zug wählen">
+
+  <div class="movecard" id="movecard"></div>
+
+  <p class="section-title">Verlauf</p>
+  <div class="strip-frame">
+    <svg id="strip" viewBox="0 0 520 250" role="img" aria-label="Gewinnchance, Punktverlust und Schauplätze über die Partie"></svg>
+  </div>
+  <p class="caption" id="stripCaption"></p>
+
+  <div class="cta">
+    <p><strong>Die eigene Partie durchrechnen lassen</strong></p>
+    <p>
+      SGF oder OGS-Adresse einwerfen unter
+      <a href="https://flascheleer-berlin.de/analyse">flascheleer-berlin.de/analyse</a>
+      — zurück kommt für jeden Zug eine Lehreinheit, deren Sätze eine
+      nachgerechnete Zahl nennen. Das Blatt zum Aushängen steht unter
+      <a href="/aushang">/aushang</a>.
+    </p>
+  </div>
+
+  <p class="section-title">Wendepunkte</p>
+  <div class="jumps" id="jumps"></div>
+
+  <p class="section-title">Schauplätze</p>
+  <div id="venues"></div>
+
+  <div class="switches">
+    <label><input type="checkbox" id="optNumbers"> Zugnummern</label>
+    <label><input type="checkbox" id="optVenue" checked> Schauplatz hervorheben</label>
+    <label><input type="checkbox" id="optEngine" checked> Engine-Erstwahl zeigen</label>
+  </div>
+
+  <p class="foot">
+    Brettstand aus den Zügen nachgerechnet, einschließlich Schlagen. Alle neun Schlag-Ereignisse
+    und die Gesamtzahl von 17 Steinen decken sich mit den Angaben der Analyse.
+    Die Gewinnchance ist durchgehend aus Sicht von Schwarz aufgetragen.
+  </p>
+
+
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ *  Daten
+ *  [Nr, Farbe, Punkt, Bewertung 0-4, Delta, Gewinnchance des Ziehenden
+ *   nach dem Zug, Engine-Erstwahl, Schauplatz]
+ * ------------------------------------------------------------------ */
+
+const RATING = ["ausgezeichnet", "gut", "Ungenauigkeit", "Fehler", "grober Fehler"];
+const SEV = ["var(--s0)", "var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
+const SEV_HEX = ["#3f7a63", "#7e9a4e", "#c9a227", "#c05a2b", "#8e2318"];
+
+const VENUES = {
+  er:  { name: "Eröffnung",                        color: "#6e7b8b" },
+  ul:  { name: "Einbruch unten links",             color: "#8b5e3c" },
+  f5:  { name: "F5-Kontakt und die Leiter um E6",  color: "#4f7a7a" },
+  k10: { name: "Weiß unterläuft K10",              color: "#7d7196" },
+  or:  { name: "Obere rechte Ecke",                color: "#a56a4b" },
+  zk:  { name: "Zentrumskollision G7 bis K9",      color: "#b4453a" },
+  f11: { name: "F11-Kaskade",                      color: "#9a7b2e" },
+  ls:  { name: "Linke Seite bis zur A-Linie",      color: "#5f7f55" },
+  ab:  { name: "Abrechnung um G10 und G7",         color: "#48607e" },
+  ep:  { name: "Untere Reihen und Endspiel",       color: "#7a6a5c" }
+};
+
+const M = [
+  [1,"B","K10",0,0.0,95.1,"K10","er"],   [2,"W","K4",0,0.1,5.4,"D4","er"],
+  [3,"B","D11",0,-0.1,93.5,"D4","er"],   [4,"W","C4",0,-0.1,5.6,"D4","er"],
+  [5,"B","C9",0,-0.2,93.5,"C8","er"],    [6,"W","L8",0,-0.1,5.7,"L7","er"],
+  [7,"B","L9",1,-1.0,84.9,"K3","er"],    [8,"W","K8",0,0.0,15.0,"K8","er"],
+  [9,"B","E3",0,0.0,84.7,"E4","ul"],     [10,"W","G3",0,-0.5,11.0,"E11","ul"],
+  [11,"B","E5",1,-0.6,82.6,"H3","ul"],   [12,"W","D6",0,0.0,17.8,"D6","ul"],
+  [13,"B","E6",0,-0.5,75.1,"C2","ul"],   [14,"W","D7",0,0.0,24.8,"D7","ul"],
+  [15,"B","C2",0,0.0,75.0,"C2","ul"],    [16,"W","D3",2,-2.4,5.6,"H11","ul"],
+  [17,"B","D2",0,-0.2,94.2,"D2","ul"],   [18,"W","E4",3,-5.7,0.4,"E7","ul"],
+  [19,"B","F4",0,-0.3,99.6,"F4","ul"],   [20,"W","D4",1,-1.5,0.3,"H11","ul"],
+  [21,"B","F3",0,0.4,99.8,"F3","ul"],    [22,"W","F5",2,-3.0,0.1,"C8","f5"],
+  [23,"B","G4",1,-0.7,99.9,"G5","f5"],   [24,"W","H3",1,-0.6,0.1,"H11","f5"],
+  [25,"B","G6",1,-0.9,99.9,"M6","f5"],   [26,"W","E7",0,0.0,0.1,"E7","f5"],
+  [27,"B","F7",1,-0.9,99.8,"M6","f5"],   [28,"W","F8",1,-1.1,0.2,"C8","f5"],
+  [29,"B","G11",1,-0.7,99.8,"M6","k10"], [30,"W","J10",0,-0.1,0.2,"C8","k10"],
+  [31,"B","J11",0,0.2,99.9,"B7","k10"],  [32,"W","H10",0,0.3,0.2,"H10","k10"],
+  [33,"B","H11",0,0.4,99.8,"H11","k10"], [34,"W","L11",0,-0.1,0.2,"L11","or"],
+  [35,"B","K11",0,0.8,99.9,"K11","or"],  [36,"W","M9",0,-0.4,0.1,"M9","or"],
+  [37,"B","L10",3,-3.8,99.8,"M10","or"], [38,"W","M10",0,-0.3,0.2,"C8","or"],
+  [39,"B","M11",0,-0.4,99.8,"B7","or"],  [40,"W","L12",1,-1.1,0.2,"C8","or"],
+  [41,"B","M12",0,-0.3,99.8,"B7","or"],  [42,"W","G7",2,-2.9,0.2,"H5","zk"],
+  [43,"B","F6",0,0.1,99.9,"F6","zk"],    [44,"W","C8",0,0.5,0.1,"C8","ls"],
+  [45,"B","G8",1,-1.4,99.8,"D9","zk"],   [46,"W","F9",3,-4.1,0.1,"H5","zk"],
+  [47,"B","H8",4,-6.4,99.5,"D9","zk"],   [48,"W","H7",3,-3.5,0.1,"H5","zk"],
+  [49,"B","J9",3,-4.7,99.6,"J7","zk"],   [50,"W","J8",3,-3.4,0.1,"D9","zk"],
+  [51,"B","H9",4,-6.8,98.8,"J7","zk"],   [52,"W","G10",3,-4.5,0.3,"D9","zk"],
+  [53,"B","K9",3,-4.1,98.8,"J7","zk"],   [54,"W","F11",4,-7.6,0.3,"D9","f11"],
+  [55,"B","F12",4,-7.7,98.8,"D9","f11"], [56,"W","E11",4,-7.0,0.5,"D9","f11"],
+  [57,"B","E12",4,-6.8,98.9,"D9","f11"], [58,"W","D9",0,0.4,1.2,"D9","ls"],
+  [59,"B","D10",0,0.7,99.1,"L4","ls"],   [60,"W","C10",2,-1.8,0.5,"B9","ls"],
+  [61,"B","B9",0,0.4,99.5,"B9","ls"],    [62,"W","B10",0,0.2,0.4,"E10","ls"],
+  [63,"B","E9",0,0.4,99.6,"E9","ls"],    [64,"W","D8",0,0.1,0.4,"D8","ls"],
+  [65,"B","F10",4,-6.8,89.1,"B11","ab"], [66,"W","C12",2,-2.4,2.4,"K3","ls"],
+  [67,"B","C11",0,-0.3,96.1,"L4","ls"],  [68,"W","B11",0,0.1,3.9,"B11","ls"],
+  [69,"B","D12",3,-3.8,50.4,"L4","ls"],  [70,"W","E8",3,-5.0,1.3,"J4","ab"],
+  [71,"B","G9",2,-2.4,82.9,"L4","ab"],   [72,"W","H5",2,-2.5,4.1,"K3","ab"],
+  [73,"B","H6",0,0.3,95.3,"H4","ab"],    [74,"W","H4",2,-2.7,2.4,"J7","ab"],
+  [75,"B","G5",3,-3.5,81.1,"L5","ab"],   [76,"W","K6",2,-2.8,11.7,"J6","ab"],
+  [77,"B","J7",4,-7.8,43.1,"D5","ab"],   [78,"W","N11",4,-6.3,9.6,"B12","or"],
+  [79,"B","K12",4,-6.9,34.1,"D5","or"],  [80,"W","N12",3,-5.3,22.5,"B12","or"],
+  [81,"B","L13",3,-5.1,38.3,"D5","or"],  [82,"W","B3",2,-2.8,28.1,"B12","ep"],
+  [83,"B","B2",3,-5.8,12.0,"D5","ep"],   [84,"W","F2",0,0.7,89.4,"B12","ep"],
+  [85,"B","E2",1,-1.1,9.2,"D5","ep"],    [86,"W","A2",4,-7.3,37.0,"B12","ep"],
+  [87,"B","K7",2,-2.3,37.5,"D5","ab"],   [88,"W","L7",0,-1.5,52.2,"L7","ab"],
+  [89,"B","J6",2,-2.4,19.0,"D5","ab"],   [90,"W","K5",0,0.9,87.5,"K5","ab"],
+  [91,"B","B12",2,-1.7,0.8,"D5","ls"],   [92,"W","A12",2,-1.9,92.9,"B8","ls"],
+  [93,"B","C13",2,-2.7,0.7,"D5","ls"],   [94,"W","G2",4,-11.2,1.2,"B8","ep"],
+  [95,"B","A10",2,-1.8,99.6,"B8","ls"],  [96,"W","B8",0,0.3,0.2,"B8","ls"],
+  [97,"B","A11",0,0.0,99.8,"A11","ls"],  [98,"W","A8",0,0.4,0.2,"A8","ls"],
+  [99,"B","C3",0,0.0,99.8,"N13","ep"],   [100,"W","B5",0,0.2,0.2,"B5","ep"],
+  [101,"B","D5",0,-0.1,99.5,"N13","ep"], [102,"W","C5",0,-0.1,0.4,"C5","ep"],
+  [103,"B","J5",0,0.2,99.7,"N13","ab"],  [104,"W","J4",0,0.1,0.4,"M8","ab"],
+  [105,"B","M13",3,-4.1,5.8,"N13","or"], [106,"W","A9",0,0.0,92.1,"A9","ls"],
+  [107,"B","B10",0,0.0,4.3,"M5","ls"],   [108,"W","M7",0,0.0,95.6,"N10","or"],
+  [109,"B","N13",0,-0.1,3.0,"B1","or"],  [110,"W","N10",0,0.0,96.6,"N10","or"],
+  [111,"B","F1",0,0.0,2.7,"B1","ep"],    [112,"W","G1",0,0.0,97.2,"G1","ep"],
+  [113,"B","E1",0,0.1,3.1,"B6","ep"],    [114,"W","A3",1,-1.3,0.6,"E10","ep"],
+  [115,"B","B1",1,-1.3,3.1,"E10","ep"],  [116,"W","E10",0,0.3,97.2,"E10","f11"],
+  [117,"B","E9",0,0.3,2.3,"E9","f11"],   [118,"W","E10",0,-0.3,96.8,"E10","f11"],
+  [119,"B","E11",0,-0.3,2.0,"E11","f11"],[120,"W","E9",0,0.0,97.4,"E9","f11"],
+  [121,"B","A1",0,0.0,1.3,"pass","ep"],  [122,"W",null,0,0.0,98.4,"pass","ep"],
+  [123,"B","A5",0,0.0,0.9,"pass","ep"],  [124,"W","A6",0,0.0,99.3,"A6","ep"],
+  [125,"B",null,0,0.0,0.4,"pass","ep"],  [126,"W",null,0,0.1,99.2,"pass","ep"]
+];
+
+const JUMPS = [
+  [18,  "18, Weiß E4"],
+  [51,  "51, Zentrum"],
+  [55,  "55, F11-Kaskade"],
+  [69,  "69, Schwarz D12"],
+  [77,  "77, Schwarz J7"],
+  [94,  "94, Weiß G2"],
+  [105, "105, Schwarz M13"],
+  [126, "Ende"]
+];
+
+/* ------------------------------------------------------------------ *
+ *  Go-Regeln: Brettstand nachrechnen
+ * ------------------------------------------------------------------ */
+
+const COLS = "ABCDEFGHJKLMN";
+const N = 13;
+
+function parsePoint(s) {
+  return [COLS.indexOf(s[0]), parseInt(s.slice(1), 10) - 1];  // Reihe 1 unten
+}
+
+function neighbours(x, y) {
+  const out = [];
+  if (x > 0)     out.push([x - 1, y]);
+  if (x < N - 1) out.push([x + 1, y]);
+  if (y > 0)     out.push([x, y - 1]);
+  if (y < N - 1) out.push([x, y + 1]);
+  return out;
+}
+
+function groupAndLiberties(grid, x, y) {
+  const colour = grid[y][x];
+  const stack = [[x, y]];
+  const seen = new Set([y * N + x]);
+  let libs = 0;
+
+  while (stack.length) {
+    const [cx, cy] = stack.pop();
+    for (const [nx, ny] of neighbours(cx, cy)) {
+      const v = grid[ny][nx];
+      if (v === null) {
+        libs++;
+      } else if (v === colour && !seen.has(ny * N + nx)) {
+        seen.add(ny * N + nx);
+        stack.push([nx, ny]);
+      }
+    }
+  }
+  return { stones: seen, libs: libs };
+}
+
+/* Vollständiger Nachbau bis einschließlich Zug `upto` (0 = leeres Brett). */
+function replay(upto) {
+  const grid = Array.from({ length: N }, () => new Array(N).fill(null));
+  const num  = Array.from({ length: N }, () => new Array(N).fill(0));
+  const ven  = Array.from({ length: N }, () => new Array(N).fill(null));
+  let capB = 0, capW = 0, lastCaptured = 0;
+
+  for (let i = 0; i < upto; i++) {
+    const mv = M[i];
+    if (mv[2] === null) { if (i === upto - 1) lastCaptured = 0; continue; }
+
+    const [x, y] = parsePoint(mv[2]);
+    grid[y][x] = mv[1];
+    num[y][x]  = mv[0];
+    ven[y][x]  = mv[7];
+
+    const enemy = mv[1] === "B" ? "W" : "B";
+    let taken = 0;
+
+    for (const [nx, ny] of neighbours(x, y)) {
+      if (grid[ny][nx] !== enemy) continue;
+      const g = groupAndLiberties(grid, nx, ny);
+      if (g.libs === 0) {
+        taken += g.stones.size;
+        for (const key of g.stones) {
+          const gx = key % N, gy = (key - gx) / N;
+          grid[gy][gx] = null;
+          num[gy][gx] = 0;
+          ven[gy][gx] = null;
+        }
+      }
+    }
+
+    if (mv[1] === "B") capB += taken; else capW += taken;
+    if (i === upto - 1) lastCaptured = taken;
+  }
+
+  return { grid, num, ven, capB, capW, lastCaptured };
+}
+
+/* ------------------------------------------------------------------ *
+ *  Zustand
+ * ------------------------------------------------------------------ */
+
+let idx = 0;
+let playing = false;
+let timer = null;
+
+const $ = (id) => document.getElementById(id);
+const svgNS = "http://www.w3.org/2000/svg";
+
+function el(name, attrs, parent) {
+  const n = document.createElementNS(svgNS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+
+function blackWinrate(i) {                 // i = 1-basierte Zugnummer
+  const mv = M[i - 1];
+  return mv[1] === "B" ? mv[5] : 100 - mv[5];
+}
+
+function fmtDelta(d) {
+  if (d > 0)  return "+" + d.toFixed(1);
+  if (d < 0)  return "−" + Math.abs(d).toFixed(1);
+  return "±0.0";
+}
+
+/* ------------------------------------------------------------------ *
+ *  Brett zeichnen
+ * ------------------------------------------------------------------ */
+
+const B_PAD = 30, B_STEP = 36, B_R = 15.6;
+const bx = (x) => B_PAD + x * B_STEP;
+const by = (y) => B_PAD + (N - 1 - y) * B_STEP;   // Reihe 1 unten
+
+function drawBoard() {
+  const svg = $("board");
+  svg.textContent = "";
+
+  const state = replay(idx);
+  const cur = idx > 0 ? M[idx - 1] : null;
+  const showNum = $("optNumbers").checked;
+  const focusVenue = $("optVenue").checked && cur ? cur[7] : null;
+
+  el("rect", { x: 0, y: 0, width: 520, height: 520, fill: "var(--wood)" }, svg);
+
+  const grid = el("g", { stroke: "var(--wood-line)", "stroke-width": 1, opacity: 0.75 }, svg);
+  for (let i = 0; i < N; i++) {
+    el("line", { x1: bx(0), y1: by(i), x2: bx(N - 1), y2: by(i) }, grid);
+    el("line", { x1: bx(i), y1: by(0), x2: bx(i), y2: by(N - 1) }, grid);
+  }
+
+  for (const [sx, sy] of [[3,3],[9,3],[3,9],[9,9],[6,6]]) {
+    el("circle", { cx: bx(sx), cy: by(sy), r: 3, fill: "var(--wood-line)", opacity: 0.85 }, svg);
+  }
+
+  const labels = el("g", {
+    fill: "var(--wood-line)", "font-size": 10, "font-family": "var(--mono)", opacity: 0.8
+  }, svg);
+  for (let i = 0; i < N; i++) {
+    const t1 = el("text", { x: bx(i), y: 16, "text-anchor": "middle" }, labels);
+    t1.textContent = COLS[i];
+    const t2 = el("text", { x: 12, y: by(i) + 3.5, "text-anchor": "middle" }, labels);
+    t2.textContent = String(i + 1);
+  }
+
+  /* Engine-Erstwahl */
+  if (cur && $("optEngine").checked && cur[6] !== "pass") {
+    const [ex, ey] = parsePoint(cur[6]);
+    if (state.grid[ey][ex] === null) {
+      el("rect", {
+        x: bx(ex) - 9, y: by(ey) - 9, width: 18, height: 18,
+        fill: "none", stroke: "#2f4f3f", "stroke-width": 2,
+        "stroke-dasharray": "3 2.5", transform: `rotate(45 ${bx(ex)} ${by(ey)})`
+      }, svg);
+    }
+  }
+
+  /* Steine */
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const v = state.grid[y][x];
+      if (!v) continue;
+
+      const dim = focusVenue && state.ven[y][x] !== focusVenue;
+      const g = el("g", { opacity: dim ? 0.34 : 1 }, svg);
+
+      el("circle", {
+        cx: bx(x) + 1.4, cy: by(y) + 1.8, r: B_R,
+        fill: "#000", opacity: 0.18
+      }, g);
+
+      el("circle", {
+        cx: bx(x), cy: by(y), r: B_R,
+        fill: v === "B" ? "var(--stone-b)" : "var(--stone-w)",
+        stroke: v === "B" ? "#000" : "var(--stone-w-ed)",
+        "stroke-width": 1
+      }, g);
+
+      if (showNum) {
+        const t = el("text", {
+          x: bx(x), y: by(y) + 4, "text-anchor": "middle",
+          "font-size": 12, "font-family": "var(--mono)",
+          fill: v === "B" ? "#e8e6e0" : "#22262a"
+        }, g);
+        t.textContent = String(state.num[y][x]);
+      }
+    }
+  }
+
+  /* Letzter Zug */
+  if (cur && cur[2]) {
+    const [lx, ly] = parsePoint(cur[2]);
+    if (state.grid[ly][lx]) {
+      el("circle", {
+        cx: bx(lx), cy: by(ly), r: B_R - 5,
+        fill: "none", stroke: SEV_HEX[cur[3]], "stroke-width": 3.4
+      }, svg);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Verlaufsstreifen
+ * ------------------------------------------------------------------ */
+
+const S_L = 34, S_R = 8, S_W = 520;
+const W_TOP = 10, W_H = 96;                 // Gewinnchance
+const L_TOP = 122, L_H = 84, L_MID = L_TOP + L_H / 2;   // Punktverlust
+const V_TOP = 216, V_H = 14;                // Schauplätze
+const MAXLOSS = 11.2;
+const sx = (i) => S_L + (i - 0.5) * (S_W - S_L - S_R) / M.length;   // i = 1..126
+
+function drawStrip() {
+  const svg = $("strip");
+  svg.textContent = "";
+
+  const defs = el("defs", {}, svg);
+  const clipUp = el("clipPath", { id: "clipUp" }, defs);
+  el("rect", { x: 0, y: W_TOP, width: S_W, height: W_H / 2 }, clipUp);
+  const clipDn = el("clipPath", { id: "clipDn" }, defs);
+  el("rect", { x: 0, y: W_TOP + W_H / 2, width: S_W, height: W_H / 2 }, clipDn);
+
+  /* --- Lane 1: Gewinnchance Schwarz --- */
+  const wy = (p) => W_TOP + (100 - p) * W_H / 100;
+
+  el("rect", { x: S_L, y: W_TOP, width: S_W - S_L - S_R, height: W_H,
+               fill: "#e3e6e0", stroke: "#c3c8c0" }, svg);
+
+  let d = `M ${sx(1)} ${wy(blackWinrate(1))}`;
+  for (let i = 2; i <= M.length; i++) d += ` L ${sx(i)} ${wy(blackWinrate(i))}`;
+  const area = `${d} L ${sx(M.length)} ${wy(50)} L ${sx(1)} ${wy(50)} Z`;
+
+  el("path", { d: area, fill: "#16191a", opacity: 0.9, "clip-path": "url(#clipUp)" }, svg);
+  el("path", { d: area, fill: "#fbfaf6", "clip-path": "url(#clipDn)" }, svg);
+  el("path", { d: d, fill: "none", stroke: "#6b706c", "stroke-width": 1 }, svg);
+  el("line", { x1: S_L, y1: wy(50), x2: S_W - S_R, y2: wy(50),
+               stroke: "#8a908a", "stroke-dasharray": "4 3" }, svg);
+
+  const lab = (x, y, txt, anchor, size, fill) => {
+    const t = el("text", { x, y, "text-anchor": anchor || "start",
+      "font-size": size || 9, "font-family": "var(--mono)",
+      fill: fill || "#5c645f" }, svg);
+    t.textContent = txt;
+    return t;
+  };
+
+  lab(S_L - 5, W_TOP + 8, "100", "end");
+  lab(S_L - 5, wy(50) + 3, "50", "end");
+  lab(S_L - 5, W_TOP + W_H, "0", "end");
+  lab(S_L, W_TOP - 2, "GEWINNCHANCE SCHWARZ", "start", 8.5);
+
+  /* --- Lane 2: Punktverlust --- */
+  el("line", { x1: S_L, y1: L_MID, x2: S_W - S_R, y2: L_MID, stroke: "#b6bcb4" }, svg);
+  lab(S_L, L_TOP - 3, "PUNKTVERLUST — SCHWARZ OBEN, WEISS UNTEN", "start", 8.5);
+
+  const bw = Math.max(1.6, (S_W - S_L - S_R) / M.length - 0.9);
+  for (let i = 1; i <= M.length; i++) {
+    const mv = M[i - 1];
+    const mag = Math.abs(mv[4]);
+    if (mag === 0) continue;
+
+    const h = Math.max(1.2, mag / MAXLOSS * (L_H / 2 - 2));
+    const up = mv[1] === "B";
+    el("rect", {
+      x: sx(i) - bw / 2, y: up ? L_MID - h : L_MID, width: bw, height: h,
+      fill: mv[4] > 0 ? "#93a98c" : SEV_HEX[mv[3]]
+    }, svg);
+  }
+
+  /* --- Lane 3: Schauplätze --- */
+  lab(S_L, V_TOP - 3, "SCHAUPLATZ", "start", 8.5);
+  for (let i = 1; i <= M.length; i++) {
+    el("rect", {
+      x: sx(i) - bw / 2 - 0.45, y: V_TOP, width: bw + 0.9, height: V_H,
+      fill: VENUES[M[i - 1][7]].color
+    }, svg);
+  }
+
+  /* --- Zugachse --- */
+  for (const t of [1, 20, 40, 60, 80, 100, 120]) {
+    lab(sx(t), V_TOP + V_H + 12, String(t), "middle", 8.5);
+  }
+
+  /* --- Marke --- */
+  if (idx > 0) {
+    el("line", {
+      x1: sx(idx), y1: W_TOP - 4, x2: sx(idx), y2: V_TOP + V_H + 2,
+      stroke: "#1a1f1d", "stroke-width": 1.5
+    }, svg);
+    el("circle", { cx: sx(idx), cy: W_TOP - 6, r: 3, fill: "#1a1f1d" }, svg);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Zugkarte, Schauplatzliste, Steuerung
+ * ------------------------------------------------------------------ */
+
+function drawCard() {
+  const card = $("movecard");
+
+  if (idx === 0) {
+    card.style.borderLeftColor = "var(--rule)";
+    card.innerHTML =
+      '<p class="line1">Leeres Brett</p>' +
+      '<p class="line2" style="color:var(--ink-soft)">vor Zug 1</p>' +
+      '<dl><dt>Hinweis</dt><dd>Vor, Zurück oder Streifen antippen</dd></dl>';
+    return;
+  }
+
+  const mv = M[idx - 1];
+  const st = replay(idx);
+  const venue = VENUES[mv[7]];
+  card.style.borderLeftColor = SEV_HEX[mv[3]];
+
+  const seite = mv[1] === "B" ? "Schwarz" : "Weiß";
+  const zug = mv[2] === null ? "pass" : mv[2];
+  const engine = mv[6] === "pass" ? "pass" : mv[6];
+  const gleich = mv[2] !== null && mv[6] === mv[2];
+
+  card.innerHTML =
+    '<p class="line1">Zug ' + mv[0] + ' — ' + seite + ' ' + zug + '</p>' +
+    '<p class="line2" style="color:' + SEV_HEX[mv[3]] + '">' +
+      RATING[mv[3]] + ', ' + fmtDelta(mv[4]) + ' Punkte</p>' +
+    '<dl>' +
+      '<dt>Gewinnchance</dt><dd>Schwarz ' + blackWinrate(mv[0]).toFixed(1) + ' %</dd>' +
+      '<dt>Engine</dt><dd>' + (gleich ? 'Erstwahl gespielt' : engine + ' statt ' + zug) + '</dd>' +
+      '<dt>Schauplatz</dt><dd>' + venue.name + '</dd>' +
+      '<dt>Gefangen</dt><dd>Schwarz ' + st.capB + ' / Weiß ' + st.capW +
+        (st.lastCaptured ? '  (dieser Zug: ' + st.lastCaptured + ')' : '') + '</dd>' +
+    '</dl>';
+}
+
+/* Die Angaben dieser Bildunterschrift sind aus der Zugliste oben
+   nachgerechnet, nicht abgeschrieben — dieselbe Pflicht, unter welcher die
+   Lehrtexte des Dienstes stehen. */
+function drawCaption() {
+  $("stripCaption").textContent =
+    "Die Fläche kippt bei 50 Prozent von Schwarz nach Weiß. Ihren Tiefpunkt hat " +
+    "Schwarz früh, mit 75.0 Prozent bei Zug 15; von Zug 19 bis 64 bleibt es über " +
+    "98 Prozent, ohne dass die Führung je in Gefahr geriete. Erst Zug 77 bringt " +
+    "sie unter 50 Prozent, und von da an wechselt sie 13-mal. Zug 114 und Zug 115 " +
+    "kosten je 1.3 Punkte und drehen sie ein letztes Mal.";
+}
+
+function buildVenues() {
+  const host = $("venues");
+  const agg = {};
+
+  for (const k in VENUES) agg[k] = { n: 0, b: 0, w: 0, first: 999, last: 0 };
+  for (const mv of M) {
+    const a = agg[mv[7]];
+    a.n++;
+    if (mv[1] === "B") a.b += mv[4]; else a.w += mv[4];
+    a.first = Math.min(a.first, mv[0]);
+    a.last = Math.max(a.last, mv[0]);
+  }
+
+  const order = Object.keys(VENUES).sort((p, q) =>
+    (agg[q].b + agg[q].w) - (agg[p].b + agg[p].w));
+
+  host.innerHTML = "";
+  for (const k of order) {
+    const a = agg[k];
+    const b = document.createElement("button");
+    b.className = "venue";
+    b.dataset.key = k;
+    b.innerHTML =
+      '<span class="swatch" style="background:' + VENUES[k].color + '"></span>' +
+      '<span class="name">' + VENUES[k].name +
+        '<span class="span">Zug ' + a.first + ' bis ' + a.last + ', ' + a.n + ' Züge</span></span>' +
+      '<span class="figs">S ' + a.b.toFixed(1) + '<br>W ' + a.w.toFixed(1) + '</span>';
+    b.addEventListener("click", () => {
+      const hit = M.find((mv) => mv[7] === k && mv[0] > idx) || M.find((mv) => mv[7] === k);
+      go(hit[0]);
+    });
+    host.appendChild(b);
+  }
+}
+
+function markVenue() {
+  const key = idx > 0 ? M[idx - 1][7] : null;
+  for (const b of document.querySelectorAll(".venue")) {
+    b.setAttribute("aria-current", b.dataset.key === key ? "true" : "false");
+  }
+}
+
+function buildJumps() {
+  const host = $("jumps");
+  host.innerHTML = "";
+  for (const [n, label] of JUMPS) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => go(n));
+    host.appendChild(b);
+  }
+}
+
+function render() {
+  drawBoard();
+  drawStrip();
+  drawCard();
+  markVenue();
+  $("counter").textContent = idx + " / " + M.length;
+  $("scrub").value = idx;
+}
+
+function go(n) {
+  idx = Math.max(0, Math.min(M.length, n));
+  render();
+}
+
+function stop() {
+  playing = false;
+  clearInterval(timer);
+  $("btnPlay").textContent = "▶";
+  $("btnPlay").setAttribute("aria-label", "Abspielen");
+}
+
+function togglePlay() {
+  if (playing) { stop(); return; }
+  if (idx >= M.length) idx = 0;
+  playing = true;
+  $("btnPlay").textContent = "❚❚";
+  $("btnPlay").setAttribute("aria-label", "Anhalten");
+  timer = setInterval(() => {
+    if (idx >= M.length) { stop(); return; }
+    go(idx + 1);
+  }, 620);
+}
+
+/* ---- Ereignisse ---- */
+
+$("btnStart").addEventListener("click", () => { stop(); go(0); });
+$("btnPrev").addEventListener("click", () => { stop(); go(idx - 1); });
+$("btnNext").addEventListener("click", () => { stop(); go(idx + 1); });
+$("btnPlay").addEventListener("click", togglePlay);
+$("scrub").addEventListener("input", (e) => { stop(); go(parseInt(e.target.value, 10)); });
+
+for (const id of ["optNumbers", "optVenue", "optEngine"]) {
+  $(id).addEventListener("change", render);
+}
+
+function stripSeek(clientX) {
+  const svg = $("strip");
+  const r = svg.getBoundingClientRect();
+  const vx = (clientX - r.left) / r.width * S_W;
+  const step = (S_W - S_L - S_R) / M.length;
+  go(Math.round((vx - S_L) / step + 0.5));
+}
+
+let dragging = false;
+const strip = $("strip");
+
+strip.addEventListener("pointerdown", (e) => {
+  stop();
+  dragging = true;
+  strip.setPointerCapture(e.pointerId);
+  stripSeek(e.clientX);
+});
+strip.addEventListener("pointermove", (e) => { if (dragging) stripSeek(e.clientX); });
+strip.addEventListener("pointerup", () => { dragging = false; });
+strip.addEventListener("pointercancel", () => { dragging = false; });
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") { stop(); go(idx + 1); e.preventDefault(); }
+  else if (e.key === "ArrowLeft") { stop(); go(idx - 1); e.preventDefault(); }
+  else if (e.key === "Home") { stop(); go(0); e.preventDefault(); }
+  else if (e.key === "End") { stop(); go(M.length); e.preventDefault(); }
+  else if (e.key === " ") { togglePlay(); e.preventDefault(); }
+});
+
+buildJumps();
+buildVenues();
+drawCaption();
+render();
+</script>
+</body>
+</html>
