@@ -1299,6 +1299,75 @@ func TestAnalyzeAsALocalJob(t *testing.T) {
 	}
 }
 
+// Der Weg, den der wasm-Client geht: Auftrag anlegen, im Kompaktformat
+// abholen. Er hat keinen JSON-Parser — der Zustand muss deshalb im
+// Statuscode stehen und das Ergebnis im lines-Format.
+func TestAnalyzeJobStatusInLinesFormat(t *testing.T) {
+	rr := serve(t, httptest.NewRequest(http.MethodPost, "/analyze?mode=job",
+		strings.NewReader(demoSGF)))
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("Status = %d, erwartet 202", rr.Code)
+	}
+
+	var accepted analyzeAcceptedReply
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("Antwort kein JSON: %v", err)
+	}
+
+	url := accepted.StatusURL + "&format=lines"
+
+	var body string
+
+	for range 100 {
+		status := serve(t, httptest.NewRequest(http.MethodGet, url, nil))
+
+		if status.Code == http.StatusAccepted {
+			// Solange gerechnet wird: kein Körper, aber die bisherige
+			// Rechenzeit im Header — sonst wüsste ein Client ohne
+			// JSON-Parser nichts über den Fortschritt.
+			if status.Body.Len() != 0 {
+				t.Errorf("202 mit Körper: %q", status.Body.String())
+			}
+
+			if status.Header().Get(elapsedHeader) == "" {
+				t.Errorf("202 ohne %s", elapsedHeader)
+			}
+
+			time.Sleep(20 * time.Millisecond)
+
+			continue
+		}
+
+		if status.Code != http.StatusOK {
+			t.Fatalf("Status = %d — Body: %s", status.Code, status.Body.String())
+		}
+
+		body = status.Body.String()
+
+		break
+	}
+
+	if body == "" {
+		t.Fatal("Auftrag wurde nicht fertig")
+	}
+
+	// Derselbe Körper, den der synchrone Weg mit format=lines liefert —
+	// der Client liest ihn mit demselben Leser.
+	if !strings.HasPrefix(body, "H"+linesFieldSep) {
+		t.Errorf("kein Kopfsatz am Anfang: %.40q", body)
+	}
+
+	if got := strings.Count(body, linesRecordSep+"M"+linesFieldSep); got != 10 {
+		t.Errorf("M-Sätze = %d, erwartet 10", got)
+	}
+
+	if !strings.Contains(body, linesRecordSep+"Z"+linesFieldSep) {
+		t.Error("kein Abschluss-Satz — der Client hielte den Feed für abgeschnitten")
+	}
+}
+
 func TestCORSPreflight(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/analyze", nil)
 	req.Header.Set("Origin", "https://flascheleer-berlin.de")

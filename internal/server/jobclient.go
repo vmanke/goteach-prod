@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -344,6 +345,15 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Kompaktformat vor allem anderen: der Client, der es anfordert, hat
+	// bewusst keinen JSON-Parser, und ein Accept-Header entscheidet das
+	// nicht so eindeutig wie ein ausdrücklicher Parameter.
+	if strings.EqualFold(r.URL.Query().Get("format"), "lines") {
+		writeStatusLines(w, reply)
+
+		return
+	}
+
 	if wantsHTML(r) {
 		writeStatusPage(w, reply)
 
@@ -351,6 +361,44 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, reply)
+}
+
+// elapsedHeader trägt die bisherige Rechenzeit einer noch laufenden
+// Analyse. Ein Header, weil der Körper im Kompaktformat dann leer bleibt
+// und ein Client ohne JSON-Parser sonst nichts über den Fortschritt
+// erführe.
+const elapsedHeader = "X-Goteach-Elapsed"
+
+// writeStatusLines beantwortet die Statusabfrage im Kompaktformat.
+//
+// Der wasm-Client der Vereinsseite hat keinen JSON-Parser — das
+// lines-Format existiert genau deshalb. Ohne diesen Weg nützte ihm der
+// Auftragsbetrieb nichts: Er bekäme eine Auftrags-ID und könnte das
+// Ergebnis dahinter nicht lesen.
+//
+// Der Zustand steckt im Statuscode, nicht im Körper: 202 solange
+// gerechnet wird, 200 mit dem fertigen Feed. So muss der Client nichts
+// auswerten, was er nicht ohnehin schon liest.
+func writeStatusLines(w http.ResponseWriter, reply jobStatusReply) {
+	switch {
+	case reply.Status == jobPending || reply.Status == jobRunning:
+		w.Header().Set(elapsedHeader,
+			strconv.FormatFloat(reply.Elapsed, 'f', 1, 64))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusAccepted)
+
+	case reply.Status == jobError:
+		httpError(w, http.StatusBadGateway, "%s", reply.Error)
+
+	case reply.Result == nil:
+		httpError(w, http.StatusBadGateway,
+			"Auftrag meldet sich fertig, liefert aber keinen Report")
+
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, linesBody(*reply.Result))
+	}
 }
 
 // writeStatusPage rendert den Auftragszustand als schlichte Seite.
