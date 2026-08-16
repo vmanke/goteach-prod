@@ -1164,6 +1164,17 @@ func TestCORSAllowsTheClubSiteOnly(t *testing.T) {
 		t.Error("Vary: Origin fehlt")
 	}
 
+	// Ohne diese Freigabe sieht ein Browser von fremder Herkunft nur die
+	// sechs Standard-Header — und der Client liest Auftrags-ID und
+	// Rechenzeit genau dort, weil sein Bündel keinen JSON-Parser trägt.
+	expose := rr.Header().Get("Access-Control-Expose-Headers")
+
+	for _, name := range []string{jobHeader, elapsedHeader} {
+		if !strings.Contains(expose, name) {
+			t.Errorf("Expose-Headers = %q, %s fehlt", expose, name)
+		}
+	}
+
 	// Fremder Absender: keine CORS-Freigabe.
 	req = httptest.NewRequest(http.MethodPost, "/analyze",
 		strings.NewReader(demoSGF))
@@ -1259,6 +1270,12 @@ func TestAnalyzeAsALocalJob(t *testing.T) {
 
 	if accepted.JobID == "" {
 		t.Fatal("keine Auftrags-ID")
+	}
+
+	// Dieselbe ID im Header: der Client, für den das gebaut ist, kann den
+	// JSON-Körper nicht lesen.
+	if got := rr.Header().Get(jobHeader); got != accepted.JobID {
+		t.Errorf("%s = %q, erwartet %q", jobHeader, got, accepted.JobID)
 	}
 
 	if !strings.HasPrefix(accepted.StatusURL, analyzeStatusPath) {

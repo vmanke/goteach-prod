@@ -240,6 +240,14 @@ func withCORS(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 
+			// Ohne diese Freigabe sieht ein Browser von einer fremden
+			// Herkunft nur die sechs Standard-Header. Der Client, für den
+			// der Auftragsbetrieb gebaut ist, liest Auftrags-ID und
+			// Rechenzeit aber genau hier: sein Bündel trägt keinen
+			// JSON-Parser, mit dem er sie aus dem Körper holen könnte.
+			h.Set("Access-Control-Expose-Headers",
+				jobHeader+", "+elapsedHeader)
+
 			// Preflight endet hier: der Browser fragt nach, ob POST mit
 			// Content-Type erlaubt ist, und braucht dafür keinen Body.
 			if r.Method == http.MethodOptions {

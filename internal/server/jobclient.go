@@ -238,6 +238,8 @@ func submitAnalyzeJob(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	w.Header().Set(jobHeader, id)
+
 	writeJSON(w, http.StatusAccepted, analyzeAcceptedReply{
 		JobID:     id,
 		Status:    jobPending,
@@ -278,6 +280,8 @@ func submitLocalAnalyzeJob(w http.ResponseWriter, r *http.Request,
 
 		return
 	}
+
+	w.Header().Set(jobHeader, id)
 
 	writeJSON(w, http.StatusAccepted, analyzeAcceptedReply{
 		JobID:     id,
@@ -373,6 +377,11 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, reply)
 }
+
+// jobHeader trägt die Auftrags-ID neben dem JSON-Körper. Derselbe Grund
+// wie bei elapsedHeader: Der Client, für den der Auftragsbetrieb gebaut
+// ist, kann den Körper nicht lesen.
+const jobHeader = "X-Goteach-Job"
 
 // wantsLines meldet, ob der Aufrufer das Kompaktformat verlangt.
 func wantsLines(r *http.Request) bool {
