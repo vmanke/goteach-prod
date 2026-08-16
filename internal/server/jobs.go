@@ -21,6 +21,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -410,6 +412,15 @@ func readJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reply := jobReply(j)
+
+	writeJSON(w, http.StatusOK, reply)
+}
+
+// jobReply macht aus einem Auftrag die Antwort. An einer Stelle, weil zwei
+// Wege sie brauchen: /engine/jobs für die aufrufende Instanz und
+// /analyze/status für den Browser, wenn diese Instanz selbst rechnet.
+func jobReply(j job) jobStatusReply {
 	reply := jobStatusReply{
 		ID:      j.ID,
 		Status:  j.Status,
@@ -418,9 +429,50 @@ func readJob(w http.ResponseWriter, r *http.Request) {
 		Elapsed: time.Since(j.Created).Seconds(),
 	}
 
-	if j.Status == jobDone || j.Status == jobError {
+	if j.finished() {
 		reply.Elapsed = j.Done.Sub(j.Created).Seconds()
 	}
 
-	writeJSON(w, http.StatusOK, reply)
+	return reply
+}
+
+// errTooManyJobs trennt die volle Warteschlange von echten Fehlern: sie
+// verdient 429 und den Hinweis, es später erneut zu versuchen.
+var errTooManyJobs = errors.New("zu viele offene Aufträge")
+
+// startLocalJob nimmt eine bereits geprüfte Partie als Auftrag an und
+// rechnet sie auf DIESER Instanz.
+//
+// Den Auftragsbetrieb gab es bisher nur zwischen zwei Instanzen — eine
+// ohne Engine, die an einen Engine-Host weiterreicht. Für den Browser
+// zählt aber dieselbe Not: eine volle Partie dauert Minuten, und eine
+// Verbindung, die so lange offen bleiben muss, reißt irgendwann. Der
+// Auftrag löst die Antwort vom Warten ab; der Browser merkt sich die ID
+// und fragt nach, auch nach einem Neuladen.
+func startLocalJob(game *board.Game, opt teaching.Options) (string, error) {
+	id, err := newJobID()
+
+	if err != nil {
+		return "", fmt.Errorf("ID erzeugen: %w", err)
+	}
+
+	if !jobs.add(&job{ID: id, Status: jobPending, Created: time.Now()}) {
+		return "", errTooManyJobs
+	}
+
+	go jobs.run(id, game, opt)
+
+	return id, nil
+}
+
+// localJob liefert den Zustand eines Auftrags dieser Instanz.
+func localJob(id string) (jobStatusReply, int, error) {
+	j, ok := jobs.get(id)
+
+	if !ok {
+		return jobStatusReply{}, http.StatusNotFound, fmt.Errorf(
+			"Auftrag %q unbekannt (abgelaufen oder Dienst neu gestartet)", id)
+	}
+
+	return jobReply(j), http.StatusOK, nil
 }

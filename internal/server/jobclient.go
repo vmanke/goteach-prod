@@ -7,6 +7,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -15,6 +16,9 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/vmanke/goteach-prod/board"
+	"github.com/vmanke/goteach-prod/teaching"
 )
 
 // jobClientTimeout deckelt Anlegen und Abfragen. Beides sind schnelle
@@ -242,19 +246,57 @@ func submitAnalyzeJob(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// handleAnalyzeStatus bedient GET /analyze/status?id=… und reicht den
-// Zustand des Auftrags durch. Der Engine-Token bleibt dabei serverseitig.
-func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
+// submitLocalAnalyzeJob nimmt den Auftrag auf dieser Instanz an und
+// antwortet sofort mit der ID — dieselbe Antwort wie beim Weiterreichen an
+// einen Engine-Host, damit ein Client die beiden Betriebsarten nicht
+// auseinanderhalten muss.
+func submitLocalAnalyzeJob(w http.ResponseWriter, r *http.Request,
+	game *board.Game, opt teaching.Options) {
+
+	id, err := startLocalJob(game, opt)
+
+	switch {
+	case errors.Is(err, errTooManyJobs):
+		httpError(w, http.StatusTooManyRequests,
+			"zu viele offene Aufträge (%d); später erneut versuchen", maxLiveJobs)
+
+		return
+
+	case err != nil:
+		httpError(w, http.StatusInternalServerError, "Auftrag anlegen: %v", err)
 
 		return
 	}
 
-	if !katagoRemoteConfigured() {
-		httpError(w, http.StatusNotFound,
-			"kein Auftragsbetrieb: diese Instanz rechnet selbst (siehe POST /analyze)")
+	statusURL := analyzeStatusPath + "?id=" + url.QueryEscape(id)
+
+	// Ohne JavaScript trägt die Statusseite das Warten, wie beim
+	// weitergereichten Auftrag auch.
+	if wantsHTML(r) {
+		http.Redirect(w, r, statusURL, http.StatusSeeOther)
+
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, analyzeAcceptedReply{
+		JobID:     id,
+		Status:    jobPending,
+		StatusURL: statusURL,
+		Hint: "Analyse läuft. Status unter statusUrl abfragen; eine " +
+			"vollständige Partie dauert Minuten. Der Auftrag liegt im " +
+			"Speicher dieser Instanz: ein Neustart oder eine halbe Stunde " +
+			"ohne Abholung, und er ist fort.",
+	})
+}
+
+// handleAnalyzeStatus bedient GET /analyze/status?id=… und reicht den
+// Zustand des Auftrags durch — vom Engine-Host, wenn dorthin delegiert
+// wird, sonst aus dem eigenen Register. Der Engine-Token bleibt dabei
+// serverseitig.
+func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		httpError(w, http.StatusMethodNotAllowed, "GET erwartet")
 
 		return
 	}
@@ -267,7 +309,27 @@ func handleAnalyzeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply, status, err := fetchJob(id)
+	var (
+		reply  jobStatusReply
+		status int
+		err    error
+	)
+
+	if katagoRemoteConfigured() {
+		reply, status, err = fetchJob(id)
+	} else {
+		// Der Auftrag liegt hier. Gehört er zu einer anderen Fly-Maschine,
+		// muss die Anfrage dorthin — sonst liefe sie in ein 404, sobald
+		// mehr als eine Maschine läuft.
+		if target := replayTarget(id); target != "" {
+			w.Header().Set("fly-replay", "instance="+target)
+			w.WriteHeader(http.StatusConflict)
+
+			return
+		}
+
+		reply, status, err = localJob(id)
+	}
 
 	if err != nil {
 		if wantsHTML(r) {

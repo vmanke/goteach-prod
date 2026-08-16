@@ -176,15 +176,31 @@ func TestEngineJobRejectsBadParams(t *testing.T) {
 	}
 }
 
-// Ohne Engine-Host gibt es keinen Auftragsbetrieb: /analyze rechnet
-// weiterhin selbst und /analyze/status existiert nicht. Das ist der
+// Ohne Engine-Host bleibt /analyze synchron — das ist der
 // Regressionsschutz für lokale Nutzung, CLI und Mock.
-func TestAnalyzeStatusWithoutRemote(t *testing.T) {
+//
+// Die Statusroute gibt es dort inzwischen trotzdem: Sie bedient die
+// Aufträge, die diese Instanz auf Wunsch (mode=job) selbst annimmt. Eine
+// unbekannte ID ist deshalb weiterhin 404, aber aus einem anderen Grund
+// als früher — nicht "die Route existiert hier nicht", sondern "diesen
+// Auftrag kennt niemand". Der Test hält beides auseinander.
+func TestAnalyzeWithoutRemoteStaysSynchronous(t *testing.T) {
+	rr := serveEnv(t, httptest.NewRequest(http.MethodPost, "/analyze",
+		strings.NewReader(demoSGF)), map[string]string{})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Status = %d, erwartet 200 (synchron)", rr.Code)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/analyze/status?id=egal", nil)
-	rr := serveEnv(t, req, map[string]string{})
+	rr = serveEnv(t, req, map[string]string{})
 
 	if rr.Code != http.StatusNotFound {
-		t.Fatalf("Status = %d, erwartet 404", rr.Code)
+		t.Fatalf("unbekannte ID: Status = %d, erwartet 404", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), "unbekannt") {
+		t.Errorf("404 ohne Grund im Body: %s", rr.Body.String())
 	}
 }
 

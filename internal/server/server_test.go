@@ -1238,6 +1238,67 @@ func TestCORSRefusesAnUnanchoredWildcard(t *testing.T) {
 	}
 }
 
+// Der Auftragsbetrieb auf einer selbst rechnenden Instanz: /analyze nimmt
+// auf Wunsch an, statt die Verbindung minutenlang zu halten, und
+// /analyze/status liefert denselben Auftrag aus dem eigenen Register.
+func TestAnalyzeAsALocalJob(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/analyze?mode=job",
+		strings.NewReader(demoSGF))
+
+	rr := serve(t, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("Status = %d, erwartet 202 — Body: %s", rr.Code, rr.Body.String())
+	}
+
+	var accepted analyzeAcceptedReply
+
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("Antwort kein JSON: %v — Body: %s", err, rr.Body.String())
+	}
+
+	if accepted.JobID == "" {
+		t.Fatal("keine Auftrags-ID")
+	}
+
+	if !strings.HasPrefix(accepted.StatusURL, analyzeStatusPath) {
+		t.Errorf("statusUrl = %q, erwartet unter %s",
+			accepted.StatusURL, analyzeStatusPath)
+	}
+
+	// Der Auftrag rechnet in einer eigenen Goroutine; abgefragt wird mit
+	// Backoff, wie ein Client es auch täte.
+	var reply jobStatusReply
+
+	for range 100 {
+		status := serve(t, httptest.NewRequest(http.MethodGet,
+			accepted.StatusURL, nil))
+
+		if status.Code != http.StatusOK {
+			t.Fatalf("Status-Abfrage = %d — Body: %s",
+				status.Code, status.Body.String())
+		}
+
+		if err := json.Unmarshal(status.Body.Bytes(), &reply); err != nil {
+			t.Fatalf("Status-Antwort kein JSON: %v", err)
+		}
+
+		if reply.Status == jobDone || reply.Status == jobError {
+			break
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if reply.Status != jobDone {
+		t.Fatalf("Auftrag endete als %q (%s)", reply.Status, reply.Error)
+	}
+
+	if reply.Result == nil || len(reply.Result.Reports) != 10 {
+		t.Fatalf("Ergebnis = %+v, erwartet 10 Reports", reply.Result)
+	}
+}
+
 func TestCORSPreflight(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/analyze", nil)
 	req.Header.Set("Origin", "https://flascheleer-berlin.de")

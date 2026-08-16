@@ -321,12 +321,15 @@ func serveInfo(w http.ResponseWriter) {
 	// auf älterem Code schlicht — genau das macht Versionsversatz
 	// zwischen Client- und Engine-Instanz mit einem Blick sichtbar.
 	mode := "synchron"
-	status := "entfällt (diese Instanz rechnet selbst)"
 
 	if katagoRemoteConfigured() {
 		mode = "auftrag"
-		status = "GET " + analyzeStatusPath + "?id=… (Auftrag abfragen)"
 	}
+
+	// Die Statusroute gibt es in beiden Betriebsarten: im Auftragsbetrieb
+	// für den weitergereichten Auftrag, sonst für den, den diese Instanz
+	// auf Wunsch (mode=job) selbst angenommen hat.
+	status := "GET " + analyzeStatusPath + "?id=… (Auftrag abfragen)"
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":    "goteach",
@@ -340,7 +343,9 @@ func serveInfo(w http.ResponseWriter) {
 		"analyze": "POST /analyze mit SGF (roh, Formularfeld oder Datei-Upload \"sgf\") " +
 			"oder ogs=<URL|ID> (online-go.com); Parameter: visits, tau, from, to, " +
 			"rules, komi; download=1 für Datei-Download; bei aktiver Auth mit " +
-			"Authorization: Bearer <Token>; im Auftragsbetrieb 202 mit Auftrags-ID",
+			"Authorization: Bearer <Token>; im Auftragsbetrieb 202 mit Auftrags-ID; " +
+			"mode=job erzwingt den Auftragsbetrieb auch auf einer selbst " +
+			"rechnenden Instanz (Auftrag im Speicher, 30 Minuten)",
 		"status":  status,
 		"warnung": "ohne konfigurierte KataGo-Engine sind alle Werte synthetisch (Mock)",
 		"healthz": "GET /healthz",
@@ -457,6 +462,17 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	// diese Instanz also weiterhin sofort, nicht erst nach dem Polling.
 	if katagoRemoteConfigured() {
 		submitAnalyzeJob(w, r, string(data), get)
+
+		return
+	}
+
+	// Auch die rechnende Instanz kann den Auftrag entgegennehmen, statt die
+	// Verbindung minutenlang offen zu halten — aber nur, wenn der Aufrufer
+	// es verlangt. Als Voreinstellung wäre es eine stille Änderung der
+	// Antwort für jeden bestehenden Aufrufer; als Wunsch ist es eine
+	// Zusage, die nur bekommt, wer sie einzulösen weiß.
+	if strings.EqualFold(get("mode"), "job") {
+		submitLocalAnalyzeJob(w, r, game, opt)
 
 		return
 	}
