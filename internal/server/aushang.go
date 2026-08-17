@@ -35,32 +35,29 @@ type aushangData struct {
 	NoEngine   bool
 }
 
-// qrCache hält die erzeugten SVG je Adresse. Ein Code kostet weniger als
-// eine Millisekunde, aber es sind je Abruf zwei, und die Adressen ändern
-// sich praktisch nie.
-var qrCache sync.Map
+// qrClub ist der Code auf die Vereinsseite. Nur er wird zwischengespeichert,
+// weil nur seine Adresse feststeht. Ein Zwischenspeicher je Adresse wüchse
+// dagegen unbegrenzt: Die Adresse der Beispielpartie enthält r.Host, und den
+// bestimmt der Aufrufer.
+var qrClub = sync.OnceValue(func() template.HTML { return qrSVG(clubAnalyseURL) })
 
 // qrSVG liefert den Code zu url als Inline-SVG. Schlägt die Erzeugung fehl
 // — etwa weil die Adresse die Kapazität übersteigt —, bleibt das Feld leer;
 // das Blatt trägt die Adresse ohnehin auch im Klartext.
+//
+// Erzeugung statt Zwischenspeicher kostet 0,4 ms je Code (gemessen für eine
+// Adresse in Version 3) und damit weniger, als ein mitwachsender Speicher
+// wert wäre.
 func qrSVG(url string) template.HTML {
-	if cached, ok := qrCache.Load(url); ok {
-		return cached.(template.HTML)
-	}
-
-	var svg template.HTML
-
 	m, err := qr.Encode([]byte(url))
 
 	if err != nil {
 		log.Printf("goteach-server: QR-Code für %q: %v", url, err)
-	} else {
-		svg = template.HTML(qr.SVG(m, 4, "QR-Code auf "+url))
+
+		return ""
 	}
 
-	qrCache.Store(url, svg)
-
-	return svg
+	return template.HTML(qr.SVG(m, 4, "QR-Code auf "+url))
 }
 
 // displayURL macht aus einer URL die Fassung fürs Auge: ohne Schema und
@@ -83,7 +80,7 @@ func handleAushang(w http.ResponseWriter, r *http.Request) {
 		ClubText:   displayURL(clubAnalyseURL),
 		PartieURL:  partieURL,
 		PartieText: displayURL(partieURL),
-		QRClub:     qrSVG(clubAnalyseURL),
+		QRClub:     qrClub(),
 		QRPartie:   qrSVG(partieURL),
 		NoEngine:   !engineAvailable(),
 	}
@@ -100,6 +97,11 @@ func handleAushang(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	// private: Die Antwort hängt am Host des Requests (Adresse und QR-Code
+	// der Beispielpartie). Ein gemeinsamer Zwischenspeicher vor dem Dienst
+	// dürfte sie sonst unter demselben Pfad an einen anderen Host ausliefern
+	// — der gedruckte Code zeigte dann auf die falsche Instanz.
+	w.Header().Set("Cache-Control", "private, max-age=3600")
 	_, _ = w.Write(buf.Bytes())
 }

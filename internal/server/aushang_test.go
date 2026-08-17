@@ -47,6 +47,40 @@ func TestAushangRenders(t *testing.T) {
 	}
 }
 
+// TestAushangIstNichtGemeinsamZwischenspeicherbar: Das Blatt hängt am Host
+// des Requests. Ein gemeinsamer Zwischenspeicher dürfte es nicht unter
+// demselben Pfad an einen anderen Host weiterreichen, sonst zeigt der
+// gedruckte QR-Code auf eine fremde Instanz.
+func TestAushangIstNichtGemeinsamZwischenspeicherbar(t *testing.T) {
+	rr := serve(t, httptest.NewRequest(http.MethodGet, "/aushang", nil))
+	cc := rr.Header().Get("Cache-Control")
+
+	if strings.Contains(cc, "public") {
+		t.Errorf("Cache-Control = %q — host-abhängige Antwort darf nicht public sein", cc)
+	}
+
+	if !strings.Contains(cc, "private") && cc != "" {
+		t.Errorf("Cache-Control = %q, erwartet private oder gar keine Angabe", cc)
+	}
+}
+
+// TestAushangZwischenspeichertNichtJeHost: Der Host stammt vom Aufrufer.
+// Würde je Host etwas dauerhaft abgelegt, wüchse der Speicher unbegrenzt.
+// Geprüft wird die beobachtbare Seite davon: Jeder Host bekommt seinen
+// eigenen, richtigen Code — auch nach vielen verschiedenen Hosts.
+func TestAushangZwischenspeichertNichtJeHost(t *testing.T) {
+	for _, host := range []string{"a.example", "b.example", "c.example", "a.example"} {
+		req := httptest.NewRequest(http.MethodGet, "/aushang", nil)
+		req.Host = host
+
+		body := serve(t, req).Body.String()
+
+		if !strings.Contains(body, `aria-label="QR-Code auf http://`+host+`/partie"`) {
+			t.Errorf("Host %s: Blatt zeigt nicht auf die eigene Beispielpartie", host)
+		}
+	}
+}
+
 // TestAushangFollowsForwardedProto sichert, dass der QR-Code auf die
 // Beispielpartie hinter einem TLS-terminierenden Proxy nicht auf http
 // zeigt — sonst führte das gedruckte Blatt ins Leere.
