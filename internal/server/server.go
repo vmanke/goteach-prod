@@ -9,6 +9,8 @@
 //	GET  /healthz     Liveness-Check
 //	POST /analyze     SGF (roh, Formularfeld oder Datei-Upload "sgf")
 //	                  → Teaching-Reports als JSON; download=1 als Datei
+//	GET  /aushang     A3-Blatt zum Ausdrucken (Einladung an den Verein)
+//	GET  /partie      Beispielpartie 13×13 als Verlaufsansicht
 //	GET  /robots.txt, /sitemap.xml, /app.js, /style.css, /favicon.svg
 //
 // Engine-Wahl über Umgebung: Sind KATAGO_PATH und KATAGO_MODEL gesetzt,
@@ -108,6 +110,8 @@ func Handler() http.Handler {
 	mux.HandleFunc("/analyze/status", requireAuth(handleAnalyzeStatus))
 	mux.HandleFunc("/engine/analyze", handleEngineAnalyze)
 	mux.HandleFunc("/engine/jobs", handleEngineJobs)
+	mux.HandleFunc("/aushang", handleAushang)
+	mux.HandleFunc("/partie", handleAsset("partie.html", "text/html; charset=utf-8"))
 	mux.HandleFunc("/robots.txt", handleRobots)
 	mux.HandleFunc("/sitemap.xml", handleSitemap)
 	mux.HandleFunc("/app.js", handleAsset("app.js", "text/javascript; charset=utf-8"))

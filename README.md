@@ -25,8 +25,9 @@ S Status/Shape, E Expansion/Endgame — Dringlichkeit geht vor Größe).
 | `strength`         | Situative Gruppenstärke je Kette und als Feld über alle Punkte (exp(−d/τ)) |
 | `katago`           | Client der KataGo Analysis Engine (JSON/stdin-stdout) + Mock für Tests + Remote-Client (`/engine/analyze`) |
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
-| `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Schnapp  |
+| `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Snapback  |
 | `internal/auth`    | PBKDF2-HMAC-SHA256 und JWT HS256 (stdlib-only)                         |
+| `internal/qr`      | QR-Codes für den Aushang (Byte-Modus, ECC M, Version 1–6, ohne Fremdcode) |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
 | `internal/server`  | HTTP-Dienst + Web-Frontend (Upload, Download, SEO, Hydration, JWT-Login, Engine-Passthrough) |
 | `cmd/goteach`      | CLI                                                                     |
@@ -116,6 +117,8 @@ PORT=8080 ./goteach-server
 | `GET /analyze/status` | Zustand und Ergebnis eines Auftrags (`?id=…`); nur bei gesetztem `KATAGO_REMOTE_URL`, sonst 404 |
 | `POST /engine/analyze` | Engine-Passthrough für Remote-Instanzen (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
 | `POST /engine/jobs`, `GET /engine/jobs` | Auftragsbetrieb auf dem Engine-Host (nur mit `KATAGO_ENGINE_TOKEN`, sonst 404) |
+| `GET /aushang`  | A3-Blatt zum Ausdrucken und Aufhängen (siehe unten)          |
+| `GET /partie`   | Beispielpartie 13×13 mit Verlauf, Wendepunkten und Schauplätzen |
 | `GET /robots.txt`, `GET /sitemap.xml` | SEO                                   |
 | `GET /app.js`, `GET /style.css`, `GET /favicon.svg` | eingebettete Assets     |
 
@@ -203,6 +206,33 @@ eine echte Engine. Ohne lokale Binary delegiert `KATAGO_REMOTE_URL` die
 Analyse an einen entfernten Engine-Host (siehe „Remote-Engine“).
 Andernfalls antwortet der Mock — die Antwort trägt dann
 `"synthetic": true` und die Werte sind **keine echte Analyse**.
+
+### Aushang und Beispielpartie
+
+`GET /aushang` liefert ein Blatt zum Ausdrucken und Aufhängen: eine
+Einladung an den Verein, eigene Partien durchrechnen zu lassen. Drucken:
+Seite öffnen, drucken, **A3 hoch, Ränder aus** — das Blatt bringt sein
+eigenes Seitenformat mit (`@page { size: A3 portrait }`) und passt auf
+eine Seite. Am Handy stapeln sich die Spalten, es ist also auch als
+Verweisziel brauchbar.
+
+Zwei QR-Codes stehen darauf: der große auf `flascheleer-berlin.de/analyse`
+(die Analyseseite des Vereins), der kleine auf `/partie` **dieser**
+Instanz — der Code folgt dem Host aus dem Request, Vorschau-Deployments
+zeigen also auf sich selbst. Erzeugt werden sie von `internal/qr`
+(Byte-Modus, Fehlerkorrektur M, Versionen 1 bis 6, kein Fremdcode); die
+Matrizen sind in `internal/qr/testdata` gegen eine unabhängige
+Implementierung abgeglichen, Maske für Maske.
+
+Läuft die Instanz ohne Engine, trägt das Blatt einen Warnhinweis: Ein
+Aushang, der für synthetische Zahlen wirbt, wäre schlimmer als keiner.
+
+`GET /partie` ist die Beispielpartie, auf die der kleine Code zeigt:
+13×13, 126 Züge, mit Verlauf der Gewinnchance, Punktverlust je Zug,
+Wendepunkten und Schauplätzen. Ihre Angaben sind nicht abgeschrieben,
+sondern nachgerechnet — `internal/server/partie_test.go` spielt die
+Zugliste mit dem `board`-Paket nach und prüft die Behauptungen der Seite
+(neun Schlag-Ereignisse, 17 Steine, die Zahlen der Bildunterschrift).
 
 ### Authentifizierung (JWT)
 
@@ -433,7 +463,7 @@ Beispielausgabe:
    Dreieck, Bambusverbindung, Tigermaul, Kosumi, Ein- und Zwei-Punkte-Sprung,
    Kleiner und Großer Springerzug, Kreuzschnitt — jeweils über alle acht
    Symmetrien des Quadrats und beide Farbrollen. Dazu die Motive, die eine
-   Variantensuche brauchen: **Leiter**, **Netz** und **Schnapp**. Damit löst
+   Variantensuche brauchen: **Leiter**, **Netz** und **Snapback**. Damit löst
    das Paket ein Versprechen ein, das der Lehrtext bisher an den Spieler
    weiterreichte („lesen Sie die Leiter") — ohne es selbst zu können.
 3. **Formen in Relation setzen.** Jede Forminstanz bekommt zwei Zeitspuren:
@@ -613,6 +643,14 @@ Leiterleser mit Gegenprobe am Ausbruchstein, der Permutationstest gegen
 unabhängige Spuren *und* gegen eine echte Kopplung, die Eindeutigkeit der
 Zug-Zuordnung, die Reproduzierbarkeit ganzer Stränge und die Rückkopplung,
 die nur die Stellungen der stärksten Stränge nachrechnet.
+
+Für Aushang und Beispielpartie zusätzlich: die QR-Matrizen Modul für
+Modul gegen eine unabhängige Implementierung, und zwar für jede der acht
+Masken (`internal/qr/testdata`), die Strafregeln der Maskenwahl an von
+Hand nachrechenbaren Mustern, sowie ein Nachspielen der Beispielpartie
+mit dem `board`-Paket, das die Zahlen der Seite bestätigt statt sie zu
+übernehmen. Das Blatt selbst wird darauf geprüft, dass es nichts nachlädt
+— gedruckt wird es ohne Netz.
 
 Die Python-Seite prüft `pytest` unter `analysis/python/`: Fensterbildung,
 Merkmalsaufbau und der JSON-Vertrag laufen ohne Modellgewichte; die

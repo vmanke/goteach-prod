@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aushang: Partien analysieren mit goteach</title>
+<meta name="robots" content="index, follow">
+<meta name="description" content="Blatt zum Ausdrucken und Aufhängen: eigene Go-Partie hochladen und für jeden Zug eine deutsche Lehreinheit zurückbekommen.">
+<style>
+/* Ein Blatt, zwei Auftritte: am Bildschirm eine gewöhnliche Seite, im
+   Druck ein A3-Bogen. Alle Maße stehen in em, deshalb genügt es, die
+   Grundschrift umzuschalten — das Verhältnis der Teile bleibt gleich. */
+
+:root {
+  --paper: #f7f5f0;
+  --card: #fffefb;
+  --ink: #211f1a;
+  --muted: #6f695e;
+  --border: #e6e1d5;
+  --accent: #8a5f18;
+  --rule: #211f1a;
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: light; }
+
+body {
+  margin: 0;
+  background: #e9e6df;
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+.sheet {
+  background: var(--paper);
+  width: min(100%, 46em);
+  margin: 0 auto;
+  padding: 2.2em 1.4em 2.4em;
+  font-size: clamp(1rem, 0.9rem + 0.5vw, 1.2rem);
+}
+
+/* ---------- Kopf ---------- */
+
+.club {
+  margin: 0 0 0.4em;
+  font-size: 0.72em;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 1.5em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0 0 0.7em;
+}
+
+.stone {
+  display: inline-block;
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  flex: none;
+}
+
+.stone-black { background: radial-gradient(circle at 35% 30%, #4a4a4a, #0a0a0a); }
+.stone-white {
+  background: radial-gradient(circle at 35% 30%, #fff, #d8d2c4);
+  border: 1px solid #b9b2a2;
+}
+
+h1 {
+  font-size: 2.6em;
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  font-weight: 700;
+  margin: 0 0 0.35em;
+}
+
+.lead {
+  font-size: 1.08em;
+  line-height: 1.45;
+  margin: 0 0 1.4em;
+  max-width: 30em;
+}
+
+.lead strong { font-weight: 600; }
+
+hr {
+  border: 0;
+  border-top: 0.14em solid var(--rule);
+  margin: 0 0 1.4em;
+}
+
+/* ---------- Drei Schritte ---------- */
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.2em;
+  margin: 0 0 1.6em;
+}
+
+.step { border-top: 0.09em solid var(--ink); padding-top: 0.6em; }
+
+.step .no {
+  font-size: 1.6em;
+  font-weight: 700;
+  line-height: 1;
+  display: block;
+  margin-bottom: 0.2em;
+}
+
+.step h2 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0 0 0.25em;
+}
+
+.step p { margin: 0; font-size: 0.86em; line-height: 1.45; color: var(--muted); }
+
+.step .url { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---------- Zwei Spalten: was drinsteht, was nicht ---------- */
+
+.columns {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 1.4em;
+  margin: 0 0 1.6em;
+}
+
+.columns h2 {
+  font-size: 0.72em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.6em;
+  font-weight: 600;
+}
+
+.columns ul { margin: 0; padding: 0; list-style: none; }
+
+.columns li {
+  font-size: 0.9em;
+  line-height: 1.4;
+  padding: 0 0 0.45em 0.95em;
+  position: relative;
+}
+
+.columns li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 0.32em;
+  height: 0.32em;
+  background: var(--accent);
+}
+
+.columns .nope li::before { background: none; border-top: 0.1em solid var(--muted); top: 0.62em; width: 0.5em; }
+
+.columns li b { font-weight: 600; }
+
+/* ---------- QR-Block ---------- */
+
+.qr {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.2em;
+  align-items: center;
+  background: var(--card);
+  border: 0.09em solid var(--border);
+  padding: 1em 1.1em;
+  margin: 0 0 1.2em;
+}
+
+.qr svg { display: block; }
+.qr .big svg { width: 9em; height: 9em; }
+.qr .small svg { width: 5.2em; height: 5.2em; }
+
+.qr .big { text-align: center; }
+.qr .small { text-align: center; }
+
+.qr .caption {
+  font-size: 0.68em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0.4em 0 0;
+}
+
+.qr .pitch { align-self: center; }
+.qr .pitch p { margin: 0 0 0.3em; }
+.qr .pitch .big-url {
+  font-size: 1.25em;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+.qr .pitch .note { font-size: 0.85em; color: var(--muted); margin: 0; }
+
+/* ---------- Hinweise ---------- */
+
+.warn {
+  border: 0.09em solid #dcc084;
+  background: #faf0da;
+  padding: 0.7em 0.9em;
+  font-size: 0.85em;
+  margin: 0 0 1.2em;
+}
+
+footer {
+  border-top: 0.09em solid var(--border);
+  padding-top: 0.7em;
+  font-size: 0.76em;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+footer b { color: var(--ink); font-weight: 600; }
+
+a { color: inherit; }
+
+/* ---------- Schmaler Bildschirm ----------
+   Am Handy wird das Blatt gelesen, nicht gedruckt: Die Spalten stapeln
+   sich, damit die Adresse nicht Buchstabe für Buchstabe umbricht. Der
+   Druckbogen bleibt davon unberührt, weil die Regel nur für screen gilt. */
+
+@media screen and (max-width: 34em) {
+  .steps,
+  .columns,
+  .qr {
+    grid-template-columns: 1fr;
+    gap: 1.1em;
+  }
+
+  .step { padding-top: 0.4em; }
+
+  .qr { justify-items: center; text-align: center; }
+  .qr .big svg { width: 11em; height: 11em; }
+  .qr .small svg { width: 6em; height: 6em; }
+  .qr .pitch { text-align: center; }
+}
+
+/* ---------- Druck: ein A3-Bogen ---------- */
+
+@page { size: A3 portrait; margin: 0; }
+
+@media print {
+  body { background: #fff; }
+
+  .sheet {
+    /* 5mm Grundschrift: 297mm ≙ 59.4em Breite, 420mm ≙ 84em Höhe. Ein
+       Blatt an der Wand wird aus zwei Metern gelesen, nicht aus fünfzig
+       Zentimetern — die Schrift ist deshalb deutlich größer als am
+       Bildschirm. Nach oben ist wenig Luft: Ab etwa 5.3mm läuft der Bogen
+       auf eine zweite Seite über, und zwar zuerst dann, wenn der Hinweis
+       auf die fehlende Engine mitgedruckt wird. */
+    font-size: 5mm;
+    width: 297mm;
+    height: 420mm;
+    padding: 15mm 16mm 12mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: #fff;
+  }
+
+  /* Die Abstände zwischen den Abschnitten verteilt space-between; die
+     eigenen Außenabstände fallen dafür weg. */
+  header, .steps, .columns, .qr, .warn { margin-bottom: 0; }
+
+  h1 { font-size: 3.3em; }
+  .lead { font-size: 1.15em; max-width: 34em; }
+
+  .qr .big svg { width: 12em; height: 12em; }
+  .qr .small svg { width: 6.4em; height: 6.4em; }
+
+  a { text-decoration: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <header>
+    <p class="club">Go-Club FlascheLeer Berlin</p>
+    <p class="mark">
+      <span class="stone stone-black" aria-hidden="true"></span><span
+        class="stone stone-white" aria-hidden="true"></span>goteach
+    </p>
+    <h1>Deine Partie,<br>Zug für Zug erklärt.</h1>
+    <p class="lead">
+      Wirf dein SGF ein und bekomm für <strong>jeden einzelnen Zug</strong>
+      eine deutsche Lehreinheit zurück: was er gekostet hat, was die Engine
+      stattdessen gespielt hätte und was auf dem Brett dahintersteckt.
+      Kostenlos, für alle im Verein.
+    </p>
+  </header>
+
+  <hr>
+
+  <section class="steps">
+    <div class="step">
+      <span class="no">1</span>
+      <h2>Partie holen</h2>
+      <p>Das SGF von deinem Server herunterladen — oder einfach die Adresse
+        einer OGS-Partie kopieren.</p>
+    </div>
+    <div class="step">
+      <span class="no">2</span>
+      <h2>Einwerfen</h2>
+      <p>Auf <span class="url">{{.ClubText}}</span> ablegen, per Drag &amp;
+        Drop oder über die Dateiauswahl.</p>
+    </div>
+    <div class="step">
+      <span class="no">3</span>
+      <h2>Lesen</h2>
+      <p>Zug für Zug im Browser oder als JSON zum Mitnehmen. Eine ganze
+        Partie braucht ein paar Minuten — Reiter offen lassen.</p>
+    </div>
+  </section>
+
+  <section class="columns">
+    <div>
+      <h2>Was du bekommst</h2>
+      <ul>
+        <li><b>Bewertung in fünf Stufen</b> — vom ausgezeichneten Zug bis
+          zum groben Fehler, samt Punktverlust und Gewinnchance.</li>
+        <li><b>Die Erstwahl der Engine</b> mit der Fortsetzung, die sie
+          gerechnet hat.</li>
+        <li><b>Deine Ketten:</b> Freiheiten, Atari, Schlagen — und ein
+          Beweis, wo eine Gruppe unbedingt lebt.</li>
+        <li><b>Formen mit Namen:</b> leeres Dreieck, Tigermaul, Bambus,
+          Springerzug. Leiter, Netz und Snapback werden nicht bloß benannt,
+          sondern gelesen: Der Text sagt dir, <i>ob</i> sie fangen.</li>
+        <li><b>Erzählstränge</b> statt einer Textwand: Die Partie wird in
+          zusammenhängende Kämpfe zerlegt, jeder mit eigener Bilanz.</li>
+      </ul>
+    </div>
+    <div class="nope">
+      <h2>Was nicht drinsteht</h2>
+      <ul>
+        <li>Keine Sprichwörter und keine Wertung ohne Messwert. Jeder Satz
+          nennt die Zahl, die ihn trägt.</li>
+        <li>Keine erfundenen Varianten: Ein Sprachmodell glättet den Text,
+          rechnen darf es nicht.</li>
+        <li>Keine Zugempfehlung. Erklärt wird der Zug, den du gespielt
+          hast.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="qr">
+    <div class="big">
+      {{.QRClub}}
+      <p class="caption">Analyse starten</p>
+    </div>
+    <div class="pitch">
+      <p class="big-url">{{.ClubText}}</p>
+      <p class="note">
+        Scannen oder eintippen. Ohne Anmeldung, ohne Installation — es
+        genügt ein Browser.
+      </p>
+    </div>
+    <div class="small">
+      {{.QRPartie}}
+      <p class="caption">Beispiel ansehen</p>
+    </div>
+  </section>
+
+  {{if .NoEngine}}
+  <p class="warn">
+    <b>Hinweis für den Aushang:</b> Dieser Dienst läuft gerade ohne
+    Analyse-Engine. Solange das so ist, sind die ausgegebenen Zahlen
+    synthetisch und für Lehrzwecke unbrauchbar — bitte erst aufhängen,
+    wenn die Engine wieder rechnet.
+  </p>
+  {{end}}
+
+  <footer>
+    <b>Quelloffen und kostenlos.</b> Beispielpartie auf dem Blatt:
+    13×13, 126 Züge, nachgerechnet mit KataGo über goteach —
+    <a href="{{.PartieURL}}">{{.PartieText}}</a>.
+    Wer eine fremde Partie hochlädt, gibt Daten Dritter weiter; die
+    sprachliche Glättung durch ein Sprachmodell lässt sich abschalten, der
+    geprüfte Text bleibt dann vollständig erhalten.
+  </footer>
+
+</div>
+
+</body>
+</html>

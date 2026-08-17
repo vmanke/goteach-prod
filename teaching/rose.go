@@ -297,13 +297,13 @@ func weakChainFindings(bucket int, color board.Color, size int, bb *board.Board,
 }
 
 // tacticOn liefert das gelesene Motiv (Leiter/Netz) zu einer Kette, falls
-// eines existiert. Schnapp ist bewusst außen vor: Er warnt vor dem Schlagen
-// und begründet keinen Angriff.
+// eines existiert. Der Snapback ist bewusst außen vor: Er warnt vor dem
+// Schlagen und begründet keinen Angriff.
 func tacticOn(tactics []shapes.Instance, color, rep string) *shapes.Instance {
 	for i := range tactics {
 		t := &tactics[i]
 
-		if t.Name == "Schnapp" || t.Color != color {
+		if t.Name == "Snapback" || t.Color != color {
 			continue
 		}
 
