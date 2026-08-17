@@ -254,11 +254,11 @@ func TestRoseEmptyTriangleIsShapeFault(t *testing.T) {
 }
 
 // tacticOn ordnet ein gelesenes Motiv der richtigen Kette zu und
-// übergeht Schnapp (der warnt vor dem Schlagen, er begründet keinen
+// übergeht den Snapback (der warnt vor dem Schlagen, er begründet keinen
 // Angriff).
 func TestTacticOn(t *testing.T) {
 	tactics := []shapes.Instance{
-		{Name: "Schnapp", Color: "Weiß", Points: []string{"Q10"}},
+		{Name: "Snapback", Color: "Weiß", Points: []string{"Q10"}},
 		{Name: "Leiter", Color: "Weiß", Points: []string{"Q10", "R10"},
 			Teaching: "Die Leiter läuft für Schwarz."},
 	}

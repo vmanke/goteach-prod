@@ -25,7 +25,7 @@ S Status/Shape, E Expansion/Endgame — Dringlichkeit geht vor Größe).
 | `strength`         | Situative Gruppenstärke je Kette und als Feld über alle Punkte (exp(−d/τ)) |
 | `katago`           | Client der KataGo Analysis Engine (JSON/stdin-stdout) + Mock für Tests + Remote-Client (`/engine/analyze`) |
 | `teaching`         | Teaching pro Zug: Reports, deutscher Lehrtext, optionaler LLM-Feinschliff |
-| `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Schnapp  |
+| `shapes`           | Benannte Formen: Schablonen mit Symmetrien plus Leiter, Netz, Snapback  |
 | `internal/auth`    | PBKDF2-HMAC-SHA256 und JWT HS256 (stdlib-only)                         |
 | `internal/qr`      | QR-Codes für den Aushang (Byte-Modus, ECC M, Version 1–6, ohne Fremdcode) |
 | `internal/dotenv`  | Minimaler .env-Loader (Secrets nie in Flags oder Logs)                 |
@@ -463,7 +463,7 @@ Beispielausgabe:
    Dreieck, Bambusverbindung, Tigermaul, Kosumi, Ein- und Zwei-Punkte-Sprung,
    Kleiner und Großer Springerzug, Kreuzschnitt — jeweils über alle acht
    Symmetrien des Quadrats und beide Farbrollen. Dazu die Motive, die eine
-   Variantensuche brauchen: **Leiter**, **Netz** und **Schnapp**. Damit löst
+   Variantensuche brauchen: **Leiter**, **Netz** und **Snapback**. Damit löst
    das Paket ein Versprechen ein, das der Lehrtext bisher an den Spieler
    weiterreichte („lesen Sie die Leiter") — ohne es selbst zu können.
 3. **Formen in Relation setzen.** Jede Forminstanz bekommt zwei Zeitspuren:

@@ -248,20 +248,36 @@ func TestKetteMitVielenFreiheitenIstKeineLeiter(t *testing.T) {
 	}
 }
 
-func TestSchnappWirdErkannt(t *testing.T) {
-	// Weißer Köderstein auf B4 mit genau einer Freiheit (C4). Schlägt
-	// Schwarz ihn dort, ist der schlagende Stein von Weiß umstellt und steht
-	// selbst im Atari — Weiß nimmt ihn zurück.
+func TestSnapbackWirdErkannt(t *testing.T) {
+	// Weißer Köderstein auf C3 mit genau einer Freiheit (C4). Schlägt
+	// Schwarz ihn dort, hängt der schlagende Stein an der schwarzen Kette
+	// D4–D3, und die steht danach mit einer Freiheit da: Weiß nimmt auf C3
+	// drei Steine zurück.
 	b := build(t,
-		".XO..",
-		"XO.O.",
-		".XO..",
-		".....",
+		"..OO.",
+		".O.XO",
+		".XOXO",
+		"..XO.",
 		".....",
 	)
 
-	if !Snapback(b, board.Point{X: 1, Y: 1}) {
-		t.Fatal("Schnapp nicht erkannt")
+	bait := board.Point{X: 2, Y: 2}
+
+	if !Snapback(b, bait) {
+		t.Fatal("Snapback nicht erkannt")
+	}
+
+	// Der Rückschlag muss auch regelkonform sein — sonst wäre es keiner.
+	if err := b.Play(board.Move{Color: board.Black, Point: board.Point{X: 2, Y: 1}}); err != nil {
+		t.Fatalf("Schwarz schlägt den Köder: %v", err)
+	}
+
+	if err := b.Play(board.Move{Color: board.White, Point: bait}); err != nil {
+		t.Fatalf("Weiß schlägt zurück: %v", err)
+	}
+
+	if b.Captured[board.Black] != 3 {
+		t.Errorf("Rückschlag nimmt %d Steine, erwartet 3", b.Captured[board.Black])
 	}
 
 	// Gegenprobe: Ohne die weiße Umstellung ist es ein gewöhnliches Atari.
@@ -274,7 +290,38 @@ func TestSchnappWirdErkannt(t *testing.T) {
 	)
 
 	if Snapback(plain, board.Point{X: 1, Y: 1}) {
-		t.Fatal("gewöhnliches Atari ist kein Schnapp")
+		t.Fatal("gewöhnliches Atari ist kein Snapback")
+	}
+}
+
+// TestKoIstKeinSnapback hält die Grenze fest, an der sich beide Motive
+// scheiden: Nimmt jede Seite genau einen Stein, so ist die Stellung ein Ko.
+// Der Rückschlag, der den Snapback ausmacht, steht dann unter dem
+// Ko-Verbot — er kommt nie zustande, und der Lehrtext dürfte ihn nicht
+// ankündigen.
+func TestKoIstKeinSnapback(t *testing.T) {
+	b := build(t,
+		".XO..",
+		"XO.O.",
+		".XO..",
+		".....",
+		".....",
+	)
+
+	bait := board.Point{X: 1, Y: 1}
+
+	if Snapback(b, bait) {
+		t.Error("Ko wurde als Snapback gemeldet")
+	}
+
+	// Beleg, dass die Stellung tatsächlich ein Ko ist: Schwarz schlägt den
+	// einen Stein, und Weiß darf nicht sofort zurückschlagen.
+	if err := b.Play(board.Move{Color: board.Black, Point: board.Point{X: 2, Y: 1}}); err != nil {
+		t.Fatalf("Schwarz schlägt: %v", err)
+	}
+
+	if err := b.Play(board.Move{Color: board.White, Point: bait}); err == nil {
+		t.Fatal("Weiß konnte sofort zurückschlagen — dann wäre es kein Ko")
 	}
 }
 

@@ -190,9 +190,14 @@ func escapes(b *board.Board, p board.Point, attacker board.Color, depth int) boo
 	return false
 }
 
-// Snapback meldet, ob am Punkt p ein Schnapp vorliegt: Der Verteidiger kann
-// eine gegnerische Kette schlagen, steht danach aber selbst sofort im Atari
-// und verliert mehr, als er gewonnen hat.
+// Snapback meldet, ob am Punkt p ein Snapback (uttegaeshi) vorliegt: Der
+// Gegner kann den Opferstein schlagen, seine schlagende Kette steht danach
+// aber selbst im Atari und fällt zurück.
+//
+// Entscheidend ist die Zahl der zurückgeschlagenen Steine. Nimmt jede
+// Seite genau einen Stein, so ist die Stellung ein Ko und der sofortige
+// Rückschlag steht unter dem Ko-Verbot — der Snapback käme gar nicht
+// zustande. Erst ab zwei Steinen greift er.
 func Snapback(b *board.Board, p board.Point) bool {
 	victim := b.Get(p)
 
@@ -214,10 +219,11 @@ func Snapback(b *board.Board, p board.Point) bool {
 		return false
 	}
 
-	// Nach dem Schlagen: Steht der schlagende Stein selbst im Atari?
+	// Nach dem Schlagen: Steht die schlagende Kette selbst im Atari, und
+	// nimmt der Rückschlag mehr als einen Stein? Sonst ist es ein Ko.
 	taken := groups.ChainAt(after, chain.Liberties[0])
 
-	return taken != nil && len(taken.Liberties) == 1
+	return taken != nil && len(taken.Liberties) == 1 && len(taken.Stones) >= 2
 }
 
 // nearbyEmpty liefert leere Punkte im gegebenen Gitterabstand zu den Steinen,
@@ -276,9 +282,9 @@ func FindTactics(b *board.Board) []Instance {
 
 		switch {
 		case len(chain.Liberties) == 1 && Snapback(b, rep):
-			out = append(out, tactic(b, "Schnapp", "snapback", chain,
+			out = append(out, tactic(b, "Snapback", "uttegaeshi", chain,
 				"Diese Kette zu schlagen kostet mehr, als sie einbringt — "+
-					"der schlagende Stein steht danach selbst im Atari."))
+					"die schlagende Kette steht danach selbst im Atari."))
 
 		case len(chain.Liberties) == 2:
 			if Ladder(b, rep, DefaultDepth) {

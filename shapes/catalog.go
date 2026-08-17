@@ -10,7 +10,7 @@
 //   - Schablonen (catalog.go, match.go): lokale Steinmuster, die man
 //     hinschreiben kann — leeres Dreieck, Bambusverbindung, Keima.
 //   - Lesearbeit (reading.go): Motive, die eine Variantensuche brauchen —
-//     Leiter, Netz, Schnapp. Als Muster sind sie nicht darstellbar.
+//     Leiter, Netz, Snapback. Als Muster sind sie nicht darstellbar.
 //
 // Bewusst NICHT enthalten sind Josekis. Das sind Zugfolgen, keine lokalen
 // Muster; sie bräuchten eine Sequenzdatenbank und ein Partienkorpus.
