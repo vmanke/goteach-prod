@@ -1,11 +1,15 @@
 package server
 
 import (
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/vmanke/goteach-prod/board"
 )
 
 func TestAushangRenders(t *testing.T) {
@@ -34,8 +38,12 @@ func TestAushangRenders(t *testing.T) {
 
 	// Beide QR-Codes müssen im Blatt stehen: der große auf die
 	// Vereinsseite, der kleine auf die Beispielpartie dieser Instanz.
-	if n := strings.Count(body, "<svg"); n != 2 {
+	if n := strings.Count(body, `aria-label="QR-Code auf `); n != 2 {
 		t.Errorf("%d QR-Codes im Blatt, erwartet 2", n)
+	}
+
+	if !strings.Contains(body, `class="gb-wood"`) {
+		t.Error("das Brett der Vereinsseite fehlt")
 	}
 
 	if !strings.Contains(body, `aria-label="QR-Code auf `+clubAnalyseURL+`"`) {
@@ -176,6 +184,110 @@ func TestSitemapListsAushangAndPartie(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sitemap.xml ohne %s", want)
+		}
+	}
+}
+
+// aushangStone findet die Steine des gezeichneten Bretts.
+var aushangStone = regexp.MustCompile(
+	`<circle class="gb-stone gb-(black|white)" cx="(\d+)" cy="(\d+)"`)
+
+// aushangMove ist der Zug, dessen Stellung das Blatt zeigt.
+const aushangMove = 94
+
+// TestAushangBrettZeigtDieStellung rechnet die gezeichnete Stellung aus der
+// Zugliste der Beispielpartie nach. Ein Blatt, das mit nachgerechneten
+// Zahlen wirbt, darf kein Brett zeigen, das die Partie nie hatte.
+func TestAushangBrettZeigtDieStellung(t *testing.T) {
+	moves, _ := loadPartie(t)
+	b := board.New(13)
+
+	for _, z := range moves[:aushangMove] {
+		colour := board.White
+
+		if z.Black {
+			colour = board.Black
+		}
+
+		move := board.Move{Color: colour, Pass: z.Point == ""}
+
+		if !move.Pass {
+			p, _, err := board.FromGTP(z.Point, 13)
+
+			if err != nil {
+				t.Fatalf("Zug %d: %v", z.Number, err)
+			}
+
+			move.Point = p
+		}
+
+		if err := b.Play(move); err != nil {
+			t.Fatalf("Zug %d: %v", z.Number, err)
+		}
+	}
+
+	want := map[string]string{}
+
+	for _, c := range []board.Color{board.Black, board.White} {
+		name := "black"
+
+		if c == board.White {
+			name = "white"
+		}
+
+		for _, p := range b.Stones(c) {
+			// Das SVG zählt die Schnittpunkte ab eins.
+			want[fmt.Sprintf("%d/%d", p.X+1, p.Y+1)] = name
+		}
+	}
+
+	body := serve(t, httptest.NewRequest(http.MethodGet, "/aushang", nil)).Body.String()
+	got := map[string]string{}
+
+	for _, m := range aushangStone.FindAllStringSubmatch(body, -1) {
+		got[m[2]+"/"+m[3]] = m[1]
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("%d gezeichnete Steine, nach Zug %d sind es %d",
+			len(got), aushangMove, len(want))
+	}
+
+	for at, colour := range want {
+		if got[at] != colour {
+			t.Errorf("Punkt %s: gezeichnet %q, nachgerechnet %q", at, got[at], colour)
+		}
+	}
+}
+
+// TestAushangBrettUnterschrift prüft die Behauptung unter dem Brett: Zug 94
+// ist Weiß G2, kostet 11,2 Punkte und ist der teuerste Zug der Partie.
+func TestAushangBrettUnterschrift(t *testing.T) {
+	moves, _ := loadPartie(t)
+	z := moves[aushangMove-1]
+
+	if z.Black || z.Point != "G2" {
+		t.Errorf("Zug %d ist %v %s, die Unterschrift nennt Weiß G2",
+			aushangMove, z.Black, z.Point)
+	}
+
+	if fmt.Sprintf("%.1f", math.Abs(z.Delta)) != "11.2" {
+		t.Errorf("Zug %d kostet %.1f Punkte, die Unterschrift nennt 11,2",
+			aushangMove, math.Abs(z.Delta))
+	}
+
+	for _, other := range moves {
+		if other.Delta < z.Delta {
+			t.Errorf("Zug %d kostet %.1f Punkte und damit mehr als Zug %d",
+				other.Number, math.Abs(other.Delta), aushangMove)
+		}
+	}
+
+	body := serve(t, httptest.NewRequest(http.MethodGet, "/aushang", nil)).Body.String()
+
+	for _, want := range []string{"nach Zug 94", "Weiß G2", "11,2"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("die Unterschrift nennt %q nicht mehr", want)
 		}
 	}
 }
