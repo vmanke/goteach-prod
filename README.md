@@ -486,8 +486,9 @@ eigenen Zug, dessen Erstwahl nicht gespielt wurde, und läuft über die
 eigenen Züge, solange die Erstwahl auf dem Punkt oder einem Nachbarpunkt
 liegt (Chebyshev-Distanz 1 — in einem Eckkampf wechselt die Engine gern
 zwischen zwei Nachbarpunkten). Bis zu drei eigene Züge ohne Treffer
-überbrückt das Fenster; der erste Zug irgendeines Spielers auf dem Punkt
-oder daneben beendet es und ist die *Auflösung* („selbst" oder „Gegner").
+zwischen zwei Treffern überbrückt das Fenster; es endet mit dem letzten
+Treffer. Der erste Zug irgendeines Spielers auf dem Punkt oder daneben
+beendet es ebenfalls und ist die *Auflösung* („selbst" oder „Gegner").
 Mindestens sechs Treffer machen eine Baustelle; der genannte Punkt ist die
 häufigste Erstwahl im Fenster, Treffer auf Nachbarpunkten werden im Text
 gesondert gezählt. Die Punktsumme ist die Summe der Zugverluste über die

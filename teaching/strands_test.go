@@ -372,6 +372,16 @@ func TestAbschnitteEinesStrangs(t *testing.T) {
 	if got := episodes(nil); len(got) != 0 {
 		t.Errorf("Abschnitte ohne Züge: %v", got)
 	}
+
+	// Genau episodeGap fremde Züge dazwischen halten den Abschnitt
+	// zusammen, einer mehr trennt ihn.
+	if got := episodes([]int{10, 10 + episodeGap + 1}); len(got) != 1 {
+		t.Errorf("%d fremde Züge trennen: %v", episodeGap, got)
+	}
+
+	if got := episodes([]int{10, 10 + episodeGap + 2}); len(got) != 2 {
+		t.Errorf("%d fremde Züge trennen nicht: %v", episodeGap+1, got)
+	}
 }
 
 func TestStrangTextZaehltRichtig(t *testing.T) {

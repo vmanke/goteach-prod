@@ -79,7 +79,8 @@ func episodes(moves []int) []MoveSpan {
 	var out []MoveSpan
 
 	for _, number := range moves {
-		if n := len(out); n > 0 && number-out[n-1].ToMove <= episodeGap {
+		// Zwischen zwei Strangzügen liegen number-ToMove-1 fremde Züge.
+		if n := len(out); n > 0 && number-out[n-1].ToMove-1 <= episodeGap {
 			out[n-1].ToMove = number
 			out[n-1].Count++
 

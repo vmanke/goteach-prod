@@ -180,6 +180,9 @@ func baustellenFor(size int, player string, own []*baustelleMove,
 			}
 		}
 
+		// last ist der letzte Treffer: Das Fenster endet mit ihm, nicht
+		// mit den überbrückten Zügen danach — die gehören zu keiner
+		// Baustelle mehr, und die Auflösung wird ab hier gesucht.
 		hits := []int{i}
 		last := i
 		gap := 0
