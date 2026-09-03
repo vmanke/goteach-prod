@@ -80,7 +80,7 @@ ohne `-moves` bleibt die Ausgabe deshalb bis auf die Zusammenfassung leer.
 
 Wichtige Flags: `-moves` (Lehreinheit je Zug), `-from/-to` (Zugbereich),
 `-tau` (Abklinglänge des Stärkemaßes, Default 3.0), `-rules`, `-komi`,
-`-json`.
+`-json`, `-bericht` (Markdown-Bericht mit SVG-Diagrammen, siehe unten).
 
 Beispielausgabe (aus der **Mock**-Demo; Zahlen daher synthetisch):
 
@@ -452,6 +452,70 @@ Beispielausgabe:
     gekoppelt: Leiter D17 ↔ Kreuzschnitt E16 (r = +0.81, Versatz 3)
 ```
 
+Ein Strang, der sich über die ganze Partie zieht, besteht meist aus
+mehreren Kämpfen mit Pausen dazwischen. Der Text nennt deshalb die Zahl
+der Abschnitte und den Schwerpunkt („in 6 Abschnitten, Schwerpunkt Züge
+154 bis 179"); die Abschnitte stehen als `episodes` im JSON. Ein
+Abschnitt endet, wenn mehr als zwölf Züge der Partie ohne Strangzug
+vergehen.
+
+## Baustellen, Bilanz und Bericht
+
+Zwei Sichten ergänzen die Stränge; beide entstehen ohne weiteren
+Engine-Aufruf aus den Zug-Reports und den Stellungen.
+
+**Baustellen** (`teaching/baustellen.go`). Eine Baustelle ist ein Punkt,
+den die Engine für einen Spieler über viele eigene Züge hinweg als
+Erstwahl nannte, ohne dass er dort spielte. Die Lehreinheit je Zug sagt
+an jeder dieser Stellen dasselbe; die Baustelle sagt es einmal, mit Dauer
+und Preis:
+
+```
+Baustellen (7)
+  G2 für Schwarz, Züge 61 bis 83, 11 Treffer, 67.3 Punkte
+  Von Zug 61 bis 83 nannte die Engine für Schwarz den Punkt G2 (unten in
+  der Mitte) in 11 von 12 eigenen Zügen als Erstwahl. Schwarz spielte in
+  dieser Zeit nie dort. Die Züge, in denen der Punkt liegen blieb, kosteten
+  zusammen 67.3 Punkte (Summe der Zugverluste laut Engine). Beendet hat es
+  Schwarz selbst mit Zug 101 auf G2. Gegenstück: Baustelle 5 der anderen
+  Seite am selben Ort.
+```
+
+Die Regeln sind fest und nachrechenbar: Ein Fenster beginnt bei einem
+eigenen Zug, dessen Erstwahl nicht gespielt wurde, und läuft über die
+eigenen Züge, solange die Erstwahl auf dem Punkt oder einem Nachbarpunkt
+liegt (Chebyshev-Distanz 1 — in einem Eckkampf wechselt die Engine gern
+zwischen zwei Nachbarpunkten). Bis zu drei eigene Züge ohne Treffer
+zwischen zwei Treffern überbrückt das Fenster; es endet mit dem letzten
+Treffer. Der erste Zug irgendeines Spielers auf dem Punkt oder daneben
+beendet es ebenfalls und ist die *Auflösung* („selbst" oder „Gegner").
+Mindestens sechs Treffer machen eine Baustelle; der genannte Punkt ist die
+häufigste Erstwahl im Fenster, Treffer auf Nachbarpunkten werden im Text
+gesondert gezählt. Die Punktsumme ist die Summe der Zugverluste über die
+Treffer und lässt sich aus den Zug-Reports nachrechnen. Baustellen beider
+Seiten zur selben Zeit an derselben Stelle (Distanz ≤ 2) verweisen
+aufeinander als *Gegenstück*.
+
+**Bilanz** (`teaching/bilanz.go`). Die Abrechnung der Endstellung:
+Gefangene aus dem Nachspielen der Züge, tote Steine aus der
+Engine-Ownership (Betrag über 0.5 auf gegnerischem Gebiet), daraus die
+Gefangenen im Sinne der Serverzählung, die Engine-Schätzung (scoreLead
+der Endstellung, Schwarz-Sicht) und — wenn das SGF ein Ergebnis nennt
+(`RE`) — dieses daneben mit der Abweichung.
+
+**Bericht** (`-bericht VERZEICHNIS`, `teaching/bericht.go`). Schreibt
+`bericht.md` und `diagramme/*.svg`: die Endstellung mit gekreuzten toten
+Steinen, je Baustelle einen Ausschnitt mit den Zügen des Fensters und dem
+Punkt rot markiert, je Strang einen Ausschnitt mit den Nummern seiner
+Züge, dazu die Tabelle der zwölf teuersten Züge. Die Diagramme sind reines
+SVG ohne Schrift- oder Bilddateien; ein Ausschnitt zeigt mindestens sieben
+Linien je Richtung und läuft an den Rändern weiter, wo das Brett
+weitergeht.
+
+Im JSON stehen Baustellen und Bilanz als `baustellen` und `bilanz` neben
+`strands` und `moves`; der HTTP-Dienst liefert beide in `POST /analyze`
+mit.
+
 ### Wie ein Strang entsteht
 
 1. **Salienztensor.** Aus den Ownership-Feldern, die KataGo ohnehin je
@@ -643,6 +707,13 @@ Leiterleser mit Gegenprobe am Ausbruchstein, der Permutationstest gegen
 unabhängige Spuren *und* gegen eine echte Kopplung, die Eindeutigkeit der
 Zug-Zuordnung, die Reproduzierbarkeit ganzer Stränge und die Rückkopplung,
 die nur die Stellungen der stärksten Stränge nachrechnet.
+
+Für Baustellen, Bilanz und Bericht zusätzlich: die Baustellen einer echten,
+mit KataGo analysierten Partie (292 Züge, `teaching/testdata`) gegen eine
+unabhängige Auswertung derselben Daten, die Nachrechenbarkeit der
+Punktsummen aus den Zug-Reports, die Bilanz an einer von Hand gesetzten
+Stellung samt SGF-Ergebnis, die Ausschnittsregel und der Zeilenumbruch der
+Diagramme, die Wohlgeformtheit jedes SVG und der Bericht am Stück.
 
 Für Aushang und Beispielpartie zusätzlich: die QR-Matrizen Modul für
 Modul gegen eine unabhängige Implementierung, und zwar für jede der acht

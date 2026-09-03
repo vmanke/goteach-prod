@@ -19,6 +19,13 @@ type GameReport struct {
 
 	Strands []Strand     `json:"strands,omitempty"`
 	Moves   []MoveReport `json:"moves"`
+
+	// Baustellen sind Punkte, die die Engine über viele Züge als Erstwahl
+	// nannte, ohne dass dort gespielt wurde (baustellen.go); Bilanz die
+	// Abrechnung der Endstellung (bilanz.go). Beide gibt es nur auf dem
+	// Sammel- und Stromweg, nicht bei Analyze.
+	Baustellen []Baustelle `json:"baustellen,omitempty"`
+	Bilanz     *Bilanz     `json:"bilanz,omitempty"`
 }
 
 // AnalyzeGame analysiert eine Partie und zerlegt sie zusätzlich in
@@ -29,6 +36,23 @@ type GameReport struct {
 // mitliefert und die Analyze bisher nach dem Ableiten der Skalare verwarf.
 func AnalyzeGame(g *board.Game, an katago.Analyzer, opt Options) (*GameReport, error) {
 	return analyzeCore(g, an, opt, true)
+}
+
+// completeReport ergänzt Baustellen und Bilanz, sobald alle Zug-Reports
+// endgültig sind — nach der Rückkopplung, damit die Summen zu den Zahlen
+// im Report passen. final ist die Engine-Antwort zur letzten analysierten
+// Stellung; ohne sie gibt es keine Bilanz.
+func completeReport(g *board.Game, report *GameReport,
+	positions []*board.Board, final *katago.Result, to int) {
+
+	report.Baustellen = findBaustellen(g.Size, report.Moves)
+
+	if final == nil || to < 0 || to >= len(positions) {
+		return
+	}
+
+	report.Bilanz = buildBilanz(g, positions[to], to, final.Ownership,
+		final.RootInfo.ScoreLead)
 }
 
 // TotalPointsLost summiert den Punktverlust eines Spielers über alle Züge.

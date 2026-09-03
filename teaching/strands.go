@@ -44,11 +44,15 @@ type MoveRef struct {
 // Strand ist ein Erzählstrang: gekoppelte Formen, die ihnen zugeordneten
 // Züge und die dabei verifizierten Zahlen.
 type Strand struct {
-	ID         int                `json:"id"`
-	Area       string             `json:"area"`
-	FromMove   int                `json:"fromMove"`
-	ToMove     int                `json:"toMove"`
-	Moves      []int              `json:"moves"`
+	ID       int    `json:"id"`
+	Area     string `json:"area"`
+	FromMove int    `json:"fromMove"`
+	ToMove   int    `json:"toMove"`
+	Moves    []int  `json:"moves"`
+	// Episodes zerlegt die Züge in zeitlich zusammenhängende Abschnitte:
+	// ein Strang, der sich über die ganze Partie zieht, besteht meist aus
+	// wenigen Kämpfen mit langen Pausen dazwischen.
+	Episodes   []MoveSpan         `json:"episodes,omitempty"`
 	Shapes     []shapes.Instance  `json:"shapes"`
 	Couplings  []Coupling         `json:"couplings,omitempty"`
 	PointsLost map[string]float64 `json:"pointsLost"`
@@ -56,6 +60,51 @@ type Strand struct {
 	Worst      *MoveRef           `json:"worst,omitempty"`
 	Text       string             `json:"text"`
 	TextLLM    string             `json:"textLLM,omitempty"`
+}
+
+// MoveSpan ist ein zusammenhängender Zugbereich eines Strangs.
+type MoveSpan struct {
+	FromMove int `json:"fromMove"`
+	ToMove   int `json:"toMove"`
+	Count    int `json:"count"`
+}
+
+// episodeGap ist die Zahl der Züge, die zwei Abschnitte eines Strangs
+// trennt: liegen mehr als so viele Züge der ganzen Partie zwischen zwei
+// Strangzügen, beginnt ein neuer Abschnitt.
+const episodeGap = 12
+
+// episodes zerlegt aufsteigend sortierte Zugnummern in Abschnitte.
+func episodes(moves []int) []MoveSpan {
+	var out []MoveSpan
+
+	for _, number := range moves {
+		// Zwischen zwei Strangzügen liegen number-ToMove-1 fremde Züge.
+		if n := len(out); n > 0 && number-out[n-1].ToMove-1 <= episodeGap {
+			out[n-1].ToMove = number
+			out[n-1].Count++
+
+			continue
+		}
+
+		out = append(out, MoveSpan{FromMove: number, ToMove: number, Count: 1})
+	}
+
+	return out
+}
+
+// mainEpisode ist der Abschnitt mit den meisten Zügen; bei Gleichstand
+// der frühere.
+func mainEpisode(spans []MoveSpan) MoveSpan {
+	var best MoveSpan
+
+	for _, span := range spans {
+		if span.Count > best.Count {
+			best = span
+		}
+	}
+
+	return best
 }
 
 // instanceTrace hält eine Forminstanz mit ihrer Zeitspur.
@@ -293,6 +342,8 @@ func trackShapes(size int, positions []*board.Board, ownership, salience [][]flo
 		return out[i].label < out[j].label
 	})
 
+	out = dropSubsumed(out)
+
 	if len(out) > MaxTraces {
 		out = out[:MaxTraces]
 	}
@@ -310,6 +361,63 @@ func trackShapes(size int, positions []*board.Board, ownership, salience [][]flo
 	}
 
 	return out
+}
+
+// subsumedCorrelation ist die Korrelation, ab der zwei Spuren als
+// dieselbe gelten.
+const subsumedCorrelation = 0.99
+
+// dropSubsumed entfernt Formen, die ganz in einer größeren Form derselben
+// Farbe liegen und deren Spur mit ihr zusammenfällt: Ein Tigermaul enthält
+// zwei Kosumi und einen Ein-Punkt-Sprung, und alle vier schlagen bei
+// denselben Zügen aus. Als vier Spuren hätten sie sechs Kopplungen mit
+// r = 1 untereinander — kein Zusammenhang, sondern viermal dieselbe
+// Beobachtung, die obendrein die Mehrfachvergleichskorrektur belastet.
+//
+// Behalten wird die jeweils größere Form, unabhängig von der Reihenfolge.
+func dropSubsumed(traces []instanceTrace) []instanceTrace {
+	keep := make([]instanceTrace, 0, len(traces))
+
+	for i, tr := range traces {
+		subsumed := false
+
+		for j, other := range traces {
+			if i != j && covers(other.instance, tr.instance) &&
+				pearsonShifted(other.salience, tr.salience, 0) >= subsumedCorrelation {
+				subsumed = true
+
+				break
+			}
+		}
+
+		if !subsumed {
+			keep = append(keep, tr)
+		}
+	}
+
+	return keep
+}
+
+// covers meldet, ob alle Steine von inner auch zu outer gehören, bei
+// gleicher Farbe; eine Form deckt sich selbst nicht.
+func covers(outer, inner shapes.Instance) bool {
+	if outer.Color != inner.Color || len(outer.Stones) <= len(inner.Stones) {
+		return false
+	}
+
+	set := map[board.Point]bool{}
+
+	for _, p := range outer.Stones {
+		set[p] = true
+	}
+
+	for _, p := range inner.Stones {
+		if !set[p] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // support zählt die Zeitpunkte, an denen eine Spur überhaupt ausschlägt.
@@ -405,6 +513,7 @@ func assemble(g *board.Game, candidates []candidate, edges []Coupling,
 
 		s.FromMove = s.Moves[0]
 		s.ToMove = s.Moves[len(s.Moves)-1]
+		s.Episodes = episodes(s.Moves)
 
 		for _, number := range s.Moves {
 			rep := byNumber[number]
@@ -568,8 +677,18 @@ func zone(v, third, size int) int {
 func strandText(s *Strand) string {
 	var sb strings.Builder
 
-	fmt.Fprintf(&sb, "%s, Züge %d bis %d (%d davon gehören hierher). ",
+	fmt.Fprintf(&sb, "%s, Züge %d bis %d (%d davon gehören hierher",
 		capitalize(s.Area), s.FromMove, s.ToMove, len(s.Moves))
+
+	// Ein Strang über die ganze Partie ist selten ein Kampf: Meist sind es
+	// mehrere mit Pausen. Der Leser soll wissen, wo der Schwerpunkt liegt.
+	if len(s.Episodes) > 1 {
+		main := mainEpisode(s.Episodes)
+		fmt.Fprintf(&sb, ", in %d Abschnitten, Schwerpunkt Züge %d bis %d",
+			len(s.Episodes), main.FromMove, main.ToMove)
+	}
+
+	sb.WriteString("). ")
 
 	if names := shapeNames(s.Shapes); names != "" {
 		fmt.Fprintf(&sb, "Beteiligte Formen: %s. ", names)
@@ -593,7 +712,11 @@ func strandText(s *Strand) string {
 		}
 	}
 
-	if s.Captures > 0 {
+	switch {
+	case s.Captures == 1:
+		sb.WriteString("Ein Stein wird geschlagen. ")
+
+	case s.Captures > 1:
 		fmt.Fprintf(&sb, "%d Steine werden geschlagen. ", s.Captures)
 	}
 

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vmanke/goteach-prod/board"
@@ -57,7 +58,10 @@ func run() error {
 				"Visit-Zahl (0 = aus)")
 		refineTop = flag.Int("refine-top", 0,
 			"wie viele Stränge nachgerechnet werden (0 = 3)")
-		jsonOut  = flag.String("json", "", "Reports zusätzlich als JSON schreiben")
+		jsonOut = flag.String("json", "", "Reports zusätzlich als JSON schreiben")
+		bericht = flag.String("bericht", "",
+			"Bericht als Markdown mit SVG-Diagrammen in dieses Verzeichnis "+
+				"schreiben (bericht.md, diagramme/)")
 		useLLM   = flag.Bool("llm", false, "LLM-Feinschliff (ANTHROPIC_API_KEY aus .env)")
 		llmModel = flag.String("llm-model", "claude-fable-5",
 			"Modell für -llm (gültige IDs siehe README)")
@@ -162,6 +166,8 @@ func run() error {
 	}
 
 	printStrands(report)
+	printBaustellen(report)
+	printBilanz(report)
 
 	if *withMoves {
 		for i := range report.Moves {
@@ -205,9 +211,59 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "goteach: JSON-Report → %s\n", *jsonOut)
 	}
 
+	if *bericht != "" {
+		b, err := teaching.BuildBericht(filepath.Base(*sgfPath), game, report)
+
+		if err != nil {
+			return err
+		}
+
+		if err := b.Write(*bericht); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "goteach: Bericht → %s (bericht.md, %d Diagramme)\n",
+			*bericht, len(b.Files))
+	}
+
 	printSummary(report.Moves)
 
 	return nil
+}
+
+// maxPrintedCouplings begrenzt die Kopplungen je Strang in der Ausgabe.
+// Bei sieben Formen an einer Stelle gibt es 21 Paare; die drei stärksten
+// sagen, was zusammengehört, der Rest steht im JSON.
+const maxPrintedCouplings = 3
+
+// printBaustellen gibt die Baustellen aus: Punkte, die die Engine über
+// viele Züge nannte, ohne dass dort gespielt wurde.
+func printBaustellen(report *teaching.GameReport) {
+	if len(report.Baustellen) == 0 {
+		return
+	}
+
+	fmt.Printf("Baustellen (%d)\n", len(report.Baustellen))
+
+	for i := range report.Baustellen {
+		b := &report.Baustellen[i]
+
+		fmt.Printf("  %s für %s, Züge %d bis %d, %d Treffer, %.1f Punkte\n",
+			b.Point, b.Player, b.FromMove, b.ToMove, b.Hits, b.PointsLost)
+		fmt.Printf("  %s\n", b.Text)
+	}
+
+	fmt.Println()
+}
+
+// printBilanz gibt die Abrechnung der Endstellung aus.
+func printBilanz(report *teaching.GameReport) {
+	if report.Bilanz == nil {
+		return
+	}
+
+	fmt.Println("Bilanz")
+	fmt.Printf("  %s\n\n", report.Bilanz.Text)
 }
 
 // printStrands gibt die Erzählstränge aus — die Hauptsicht auf eine Partie.
@@ -233,7 +289,14 @@ func printStrands(report *teaching.GameReport) {
 			fmt.Printf("    Lehrtext (LLM): %s\n", s.TextLLM)
 		}
 
-		for _, c := range s.Couplings {
+		for k, c := range s.Couplings {
+			if k == maxPrintedCouplings {
+				fmt.Printf("    … und %d weitere Kopplungen (siehe -json)\n",
+					len(s.Couplings)-maxPrintedCouplings)
+
+				break
+			}
+
 			fmt.Printf("    gekoppelt: %s ↔ %s (r = %+.2f, Versatz %d)\n",
 				c.From, c.To, c.Correlation, c.Lag)
 		}

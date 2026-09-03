@@ -394,6 +394,12 @@ type analyzeResponse struct {
 	// Detailebene darunter erhalten.
 	Strands []teaching.Strand `json:"strands,omitempty"`
 
+	// Baustellen und Bilanz ergänzen die Stränge: liegen gelassene Punkte
+	// und die Abrechnung der Endstellung (teaching/baustellen.go,
+	// teaching/bilanz.go).
+	Baustellen []teaching.Baustelle `json:"baustellen,omitempty"`
+	Bilanz     *teaching.Bilanz     `json:"bilanz,omitempty"`
+
 	Reports []teaching.MoveReport `json:"reports,omitempty"`
 }
 
@@ -885,6 +891,8 @@ func computeAnalysisEmitting(game *board.Game, opt teaching.Options,
 	}
 
 	resp.Strands = report.Strands
+	resp.Baustellen = report.Baustellen
+	resp.Bilanz = report.Bilanz
 	resp.Reports = report.Moves
 
 	if emit != nil {

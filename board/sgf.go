@@ -12,6 +12,10 @@ type Game struct {
 	Komi  float64
 	Rules string
 
+	// Result ist das Ergebnis laut SGF (RE), z. B. "B+24.5", "W+R" oder
+	// leer, wenn die Datei keines nennt.
+	Result string
+
 	// Setup sind vorab gesetzte Steine (AB/AW, z. B. Handicap).
 	Setup []Move
 
@@ -61,6 +65,10 @@ func ParseSGF(data string) (*Game, error) {
 
 	if v, ok := root.props["RU"]; ok && len(v) > 0 {
 		g.Rules = strings.ToLower(strings.TrimSpace(v[0]))
+	}
+
+	if v, ok := root.props["RE"]; ok && len(v) > 0 {
+		g.Result = strings.TrimSpace(v[0])
 	}
 
 	for _, n := range nodes {
@@ -122,6 +130,44 @@ func (n sgfNode) appendMove(g *Game, key string, c Color) error {
 	g.Moves = append(g.Moves, Move{Color: c, Point: pt, Pass: pass})
 
 	return nil
+}
+
+// ResultMargin liest das SGF-Ergebnis. winner ist Empty bei Jigo oder
+// unbekanntem Ergebnis; numeric meldet, ob eine Punktdifferenz vorliegt.
+// "B+24.5" ergibt (Black, 24.5, true), "W+R" ergibt (White, 0, false),
+// "0" und "Draw" ergeben (Empty, 0, true).
+func (g *Game) ResultMargin() (winner Color, margin float64, numeric bool) {
+	re := strings.ToUpper(strings.TrimSpace(g.Result))
+
+	switch re {
+	case "", "?", "VOID":
+		return Empty, 0, false
+
+	case "0", "DRAW", "JIGO":
+		return Empty, 0, true
+	}
+
+	if len(re) < 2 || re[1] != '+' {
+		return Empty, 0, false
+	}
+
+	switch re[0] {
+	case 'B':
+		winner = Black
+	case 'W':
+		winner = White
+	default:
+		return Empty, 0, false
+	}
+
+	f, err := strconv.ParseFloat(re[2:], 64)
+
+	if err != nil {
+		// "R", "Resign", "T", "F" — ein Sieg ohne Punktzahl.
+		return winner, 0, false
+	}
+
+	return winner, f, true
 }
 
 // Positions spielt die Partie nach und liefert alle N+1 Stellungen

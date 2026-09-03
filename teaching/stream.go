@@ -150,6 +150,7 @@ func AnalyzeStream(g *board.Game, an katago.Analyzer, opt Options,
 	}
 
 	report.Strands = streamStrands(g, opt, positions, byTurn, reports, from, to)
+	completeReport(g, report, positions, byTurn[to], to)
 
 	if h.Strands != nil && len(report.Strands) > 0 {
 		if err := h.Strands(report.Strands); err != nil {
