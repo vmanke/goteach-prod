@@ -512,6 +512,18 @@ func writeReportHTML(b *strings.Builder, reply jobStatusReply) {
 		}
 	}
 
+	if len(res.Baustellen) > 0 {
+		fmt.Fprintf(b, "<h2>Baustellen (%d)</h2>", len(res.Baustellen))
+
+		for i := range res.Baustellen {
+			fmt.Fprintf(b, "<p>%s</p>", html.EscapeString(res.Baustellen[i].Text))
+		}
+	}
+
+	if res.Bilanz != nil {
+		fmt.Fprintf(b, "<h2>Bilanz</h2><p>%s</p>", html.EscapeString(res.Bilanz.Text))
+	}
+
 	if len(res.Reports) > 0 {
 		fmt.Fprintf(b, "<h2>Züge (%d)</h2><pre>", len(res.Reports))
 

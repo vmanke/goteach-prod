@@ -292,6 +292,8 @@ func analyzeCore(g *board.Game, an katago.Analyzer, opt Options,
 			return nil, err
 		}
 
+		completeReport(g, report, positions, byTurn[to], to)
+
 		if opt.PolishStrand != nil {
 			for i := range report.Strands {
 				s := &report.Strands[i]

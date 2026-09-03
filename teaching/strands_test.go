@@ -2,10 +2,12 @@ package teaching
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/vmanke/goteach-prod/board"
 	"github.com/vmanke/goteach-prod/katago"
+	"github.com/vmanke/goteach-prod/shapes"
 )
 
 // denseAnalyzer erzeugt Ownership als Summe über *alle* Steine statt über den
@@ -343,5 +345,112 @@ func TestWeitVerteilterStrangWirdSoBenannt(t *testing.T) {
 
 	if got := areaName(19, region); got != "über das ganze Brett verteilt" {
 		t.Fatalf("areaName = %q", got)
+	}
+}
+
+func TestAbschnitteEinesStrangs(t *testing.T) {
+	moves := []int{1, 117, 118, 121, 154, 155, 160, 170, 198, 287}
+	spans := episodes(moves)
+	want := []MoveSpan{
+		{1, 1, 1}, {117, 121, 3}, {154, 170, 4}, {198, 198, 1}, {287, 287, 1},
+	}
+
+	if len(spans) != len(want) {
+		t.Fatalf("%v, erwartet %v", spans, want)
+	}
+
+	for i := range want {
+		if spans[i] != want[i] {
+			t.Errorf("Abschnitt %d: %+v, erwartet %+v", i, spans[i], want[i])
+		}
+	}
+
+	if main := mainEpisode(spans); main != want[2] {
+		t.Errorf("Schwerpunkt %+v", main)
+	}
+
+	if got := episodes(nil); len(got) != 0 {
+		t.Errorf("Abschnitte ohne Züge: %v", got)
+	}
+}
+
+func TestStrangTextZaehltRichtig(t *testing.T) {
+	s := &Strand{
+		Area: "unten links", FromMove: 4, ToMove: 280,
+		Moves:      []int{4, 7, 8, 205, 206, 280},
+		PointsLost: map[string]float64{"Schwarz": 38.2, "Weiß": -1.5},
+		Captures:   1,
+	}
+	s.Episodes = episodes(s.Moves)
+
+	text := strandText(s)
+
+	for _, want := range []string{
+		"Unten links, Züge 4 bis 280 (6 davon gehören hierher, in 3 Abschnitten, Schwerpunkt Züge 4 bis 8).",
+		"Schwarz verliert hier 38.2 Punkte.",
+		"Weiß gewinnt hier 1.5 Punkte.",
+		"Ein Stein wird geschlagen.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Text ohne %q:\n%s", want, text)
+		}
+	}
+
+	s.Captures = 4
+	s.Moves = []int{4, 7, 8}
+	s.Episodes = episodes(s.Moves)
+
+	text = strandText(s)
+
+	if !strings.Contains(text, "4 Steine werden geschlagen.") ||
+		strings.Contains(text, "Abschnitten") {
+		t.Errorf("Text: %s", text)
+	}
+}
+
+func TestDeckungsgleicheFormenWerdenZusammengefasst(t *testing.T) {
+	series := make([]float64, 40)
+
+	for i := range series {
+		series[i] = float64(i%7) * 0.1
+	}
+
+	other := make([]float64, 40)
+
+	for i := range other {
+		other[i] = float64((i*3)%11) * 0.1
+	}
+
+	tiger := shapes.Instance{Name: "Tigermaul", Color: "Weiß",
+		Stones: []board.Point{{X: 0, Y: 15}, {X: 2, Y: 15}, {X: 1, Y: 16}}}
+	kosumi := shapes.Instance{Name: "Kosumi", Color: "Weiß",
+		Stones: []board.Point{{X: 0, Y: 15}, {X: 1, Y: 16}}}
+	black := shapes.Instance{Name: "Kosumi", Color: "Schwarz",
+		Stones: []board.Point{{X: 0, Y: 15}, {X: 1, Y: 16}}}
+	elsewhere := shapes.Instance{Name: "Kosumi", Color: "Weiß",
+		Stones: []board.Point{{X: 2, Y: 15}, {X: 3, Y: 16}}}
+
+	traces := []instanceTrace{
+		{label: "Kosumi A4", instance: kosumi, salience: series},
+		{label: "Tigermaul A4", instance: tiger, salience: series},
+		{label: "Kosumi A4 (schwarz)", instance: black, salience: series},
+		{label: "Kosumi C4", instance: elsewhere, salience: series},
+		{label: "Kosumi A4 (andere Spur)", instance: kosumi, salience: other},
+	}
+
+	kept := dropSubsumed(traces)
+	labels := make([]string, 0, len(kept))
+
+	for _, tr := range kept {
+		labels = append(labels, tr.label)
+	}
+
+	// Das weiße Kosumi mit derselben Spur geht im Tigermaul auf; die
+	// schwarze Form, die Form daneben und das Kosumi mit eigener Spur
+	// bleiben.
+	want := "Tigermaul A4|Kosumi A4 (schwarz)|Kosumi C4|Kosumi A4 (andere Spur)"
+
+	if got := strings.Join(labels, "|"); got != want {
+		t.Fatalf("%s\nerwartet %s", got, want)
 	}
 }
