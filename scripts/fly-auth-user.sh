@@ -68,9 +68,11 @@ if ! raw="$("${FLY}" ssh console -a "${APP}" -C 'printenv AUTH_USERS')"; then
     exit 1
 fi
 
-# flyctl kann vor dem Wert Hinweise ausgeben. Der Wert ist die letzte Zeile
-# mit einem Hash; jeder Eintrag darin wird unten noch einzeln geprüft.
-current="$(printf '%s\n' "${raw}" | tr -d '\r' | grep 'pbkdf2-sha256[$]' | tail -n 1 || true)"
+# Der Wert darf über mehrere Zeilen gehen: internal/auth trimmt jeden
+# Eintrag und jeden Teil davon. Deshalb zählt die ganze Ausgabe, mit allen
+# Zeilen; die Zeilenumbrüche fallen weg. Gibt flyctl selbst etwas auf stdout
+# aus, scheitert unten die Prüfung der Einträge, und nichts wird geändert.
+current="$(printf '%s' "${raw}" | tr -d '\r\n')"
 
 if [[ -z "${current}" ]]; then
     echo "AUTH_USERS ist in der Maschine leer oder nicht lesbar. Nichts geändert." >&2
@@ -80,7 +82,9 @@ fi
 
 # --- 2. Einträge prüfen, den eigenen herausnehmen ------------------------
 
-hash_re='^pbkdf2-sha256[$][^[:space:]]+$'
+# Genau das Format aus internal/auth/users.go: Iterationen, Salt und
+# Schlüssel in Base64-URL ohne Füllzeichen.
+hash_re='^pbkdf2-sha256[$][0-9]+[$][A-Za-z0-9_-]+[$][A-Za-z0-9_-]+$'
 kept=()
 replaced=0
 
@@ -111,9 +115,10 @@ done
 
 # --- 3. Neues Passwort lesen und hashen ----------------------------------
 
-read -r -s -p "Neues Passwort für ${NAME}: " pass1
+# IFS= hält Leerzeichen am Rand: /login prüft das Passwort ungekürzt.
+IFS= read -r -s -p "Neues Passwort für ${NAME}: " pass1
 echo >&2
-read -r -s -p "Passwort wiederholen: " pass2
+IFS= read -r -s -p "Passwort wiederholen: " pass2
 echo >&2
 
 if [[ "${pass1}" != "${pass2}" ]]; then
