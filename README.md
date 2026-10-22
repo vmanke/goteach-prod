@@ -271,6 +271,15 @@ curl -X POST --data-binary @partie.sgf \
   -H "Authorization: Bearer $TOKEN" localhost:8080/analyze
 ```
 
+Auf Fly.io zeigt `fly secrets list` nur Namen, nie Werte. Einen Benutzer
+ergänzen oder ein Passwort neu setzen, ohne die übrigen Einträge zu
+verlieren, erledigt `scripts/fly-auth-user.sh <name>`: Es liest den
+laufenden Wert über `fly ssh console`, prüft jeden Eintrag, ersetzt nur
+den eigenen und fragt vor `fly secrets set` nach. Das Passwort wird ohne
+Echo gelesen; an Fly geht nur der Hash. Ohne Go erzeugt
+`python3 scripts/passhash.py` denselben Hash (nur Standardbibliothek);
+das Skript nimmt Python von selbst, wenn Go fehlt.
+
 Details: `POST /login` nimmt JSON `{"username":…,"password":…}` (max.
 4 KiB) und antwortet mit `{"token":…,"tokenType":"Bearer","expiresAt":…}`.
 Falscher Name und falsches Passwort ergeben dieselbe 401-Antwort (kein

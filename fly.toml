@@ -27,17 +27,19 @@ primary_region = 'fra'
   # "*.vercel.app" jede fremde Seite auf Vercel einschlösse.
   GOTEACH_CORS_ORIGINS = "https://flascheleer-berlin.de,https://www.flascheleer-berlin.de,https://flaleer-berlin.vercel.app,https://flaleer-berlin-*-vmankes-projects.vercel.app"
 
-  # Empfohlen, aber bewusst noch nicht aktiv: Mit GOTEACH_REQUIRE_AUTH = "1"
-  # startet der Dienst nicht mehr, wenn AUTH_USERS fehlt — statt still
-  # öffentlich zu laufen und pro Anfrage minutenlang alle Kerne zu binden.
+  # Mit GOTEACH_REQUIRE_AUTH = "1" startet der Dienst nicht, wenn AUTH_USERS
+  # fehlt — statt still öffentlich zu laufen und pro Anfrage minutenlang alle
+  # Kerne zu binden. Eingeschaltet am 22.10.2026, nachdem AUTH_USERS und
+  # AUTH_JWT_SECRET als Secrets gesetzt waren.
   #
-  # Vor dem Einschalten prüfen, dass das Secret wirklich gesetzt ist:
+  # Wer die Secrets löscht oder umbenennt, prüft vorher:
   #
   #   fly secrets list          # AUTH_USERS und AUTH_JWT_SECRET müssen da sein
   #
   # Sonst schlägt der nächste Deploy beim Start fehl — genau das ist der
-  # Zweck, aber es soll niemanden überraschen.
-  # GOTEACH_REQUIRE_AUTH = "1"
+  # Zweck, aber es soll niemanden überraschen. Benutzer ergänzen oder ein
+  # Passwort neu setzen: scripts/fly-auth-user.sh <name>.
+  GOTEACH_REQUIRE_AUTH = "1"
 
 [http_service]
   internal_port = 8080
